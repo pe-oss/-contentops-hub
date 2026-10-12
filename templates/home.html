@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Trang chủ | My SaaS Boilerplate{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>Boilerplate Django cho SaaS</h1>
+  <p>Khởi đầu nhanh với đăng nhập, đăng ký, đổi mật khẩu, webhook thanh toán PayOS/SePay, cấu hình deploy Docker/Render và giao diện nền tảng.</p>
+  <div class="nav-links" style="justify-content: center;">
+    <a class="btn btn-primary" href="{% url 'accounts:register' %}">Bắt đầu miễn phí</a>
+    <a class="btn" href="{% url 'pricing' %}">Xem bảng giá</a>
+    <a class="btn" href="{% url 'accounts:login' %}">Tôi đã có tài khoản</a>
+  </div>
+</section>
+{% endblock %}

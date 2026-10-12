@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<section class="dashboard-page">
+  <div class="dashboard-header">
+    <div>
+      <p class="eyebrow">Dashboard</p>
+      <h1>Xin chào, {{ request.user.username }}</h1>
+      <p class="muted">Quản lý tài khoản, gói dịch vụ và lịch sử thanh toán của bạn.</p>
+    </div>
+    <span class="badge {% if subscription_status == 'Pro' %}badge-pro{% endif %}">{{ subscription_status }}</span>
+  </div>
+
+  <div class="dashboard-grid">
+    <article class="card stat-card">
+      <span class="muted">Username</span>
+      <strong>{{ request.user.username }}</strong>
+    </article>
+    <article class="card stat-card">
+      <span class="muted">Email</span>
+      <strong>{{ request.user.email|default:"Chưa cập nhật" }}</strong>
+    </article>
+    <article class="card stat-card">
+      <span class="muted">Gói dịch vụ</span>
+      <strong>{{ subscription_status }}</strong>
+    </article>
+  </div>
+
+  <section class="card payment-card">
+    <div class="section-title">
+      <h2>Lịch sử thanh toán</h2>
+      <span class="muted">10 giao dịch gần nhất</span>
+    </div>
+
+    {% if payments %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Thời gian</th>
+              <th>Nhà cung cấp</th>
+              <th>Mã đơn</th>
+              <th>Gói</th>
+              <th>Số tiền</th>
+              <th>Trạng thái</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for payment in payments %}
+              <tr>
+                <td>{{ payment.created_at|date:"d/m/Y H:i" }}</td>
+                <td>{{ payment.get_provider_display }}</td>
+                <td>{{ payment.order_code|default:"-" }}</td>
+                <td>{{ payment.get_plan_display }}</td>
+                <td>{{ payment.amount }} đ</td>
+                <td>{{ payment.get_status_display }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">Bạn chưa có giao dịch thanh toán nào. Tài khoản hiện đang ở gói Free.</p>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}

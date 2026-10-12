@@ -1,0 +1,47 @@
+{% load static %}
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}My SaaS Boilerplate{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <script defer src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <script defer src="{% static 'js/app.js' %}"></script>
+</head>
+<body>
+  <header class="navbar">
+    <div class="container nav-inner">
+      <a class="brand" href="{% url 'home' %}">SaaS Boilerplate</a>
+      <nav class="nav-links">
+        <a class="btn" href="{% url 'pricing' %}">Bảng giá</a>
+        {% if request.user.is_authenticated %}
+          <span class="muted">Xin chào, {{ request.user.username }}</span>
+          <a class="btn btn-primary" href="{% url 'dashboard' %}">Dashboard</a>
+          <a class="btn" href="{% url 'accounts:password_change' %}">Đổi mật khẩu</a>
+          <form method="post" action="{% url 'accounts:logout' %}">{% csrf_token %}<button class="btn" type="submit">Đăng xuất</button></form>
+        {% else %}
+          <a class="btn" href="{% url 'accounts:login' %}">Đăng nhập</a>
+          <a class="btn btn-primary" href="{% url 'accounts:register' %}">Đăng ký</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+
+  {% if messages %}
+    <div class="messages">
+      {% for message in messages %}
+        <div class="message" data-auto-hide>{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <div class="container">© {% now "Y" %} SaaS Boilerplate. Built with Django + HTMX.</div>
+  </footer>
+</body>
+</html>

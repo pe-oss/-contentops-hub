@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Bảng giá | SaaS Boilerplate{% endblock %}
+
+{% block content %}
+<section class="pricing-page">
+  <div class="dashboard-header">
+    <div>
+      <p class="eyebrow">Bảng giá</p>
+      <h1>Chọn gói phù hợp với nhu cầu của bạn</h1>
+      <p class="muted">Bắt đầu miễn phí, nâng cấp Pro khi bạn cần thêm tính năng cao cấp và hỗ trợ ưu tiên.</p>
+    </div>
+    <div class="nav-links">
+      <a class="btn" href="{% url 'home' %}">Trang chủ</a>
+      {% if request.user.is_authenticated %}
+        <a class="btn btn-primary" href="{% url 'dashboard' %}">Dashboard</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="pricing-grid">
+    <article class="card pricing-card">
+      <div>
+        <p class="eyebrow">Free</p>
+        <h2>Gói Miễn phí</h2>
+        <p class="pricing-price">0 đ<span>/tháng</span></p>
+        <p class="muted">Dành cho người dùng mới bắt đầu trải nghiệm nền tảng.</p>
+      </div>
+      <ul class="feature-list">
+        <li>Dashboard cá nhân cơ bản</li>
+        <li>Quản lý tài khoản và bảo mật đăng nhập</li>
+        <li>Xem lịch sử thanh toán gần nhất</li>
+        <li>Hỗ trợ cộng đồng</li>
+      </ul>
+      {% if request.user.is_authenticated %}
+        <a class="btn" href="{% url 'dashboard' %}">Đang sử dụng Free</a>
+      {% else %}
+        <a class="btn btn-primary" href="{% url 'accounts:register' %}">Bắt đầu ngay</a>
+      {% endif %}
+    </article>
+
+    <article class="card pricing-card pricing-card-featured">
+      <span class="badge badge-popular">Phổ biến nhất</span>
+      <div>
+        <p class="eyebrow">Pro</p>
+        <h2>Gói Chuyên nghiệp</h2>
+        <p class="pricing-price">{{ pro_price_display }} đ<span>/tháng</span></p>
+        <p class="muted">Mở khóa đầy đủ tính năng cao cấp, tự động hóa và hỗ trợ 24/7.</p>
+      </div>
+      <ul class="feature-list">
+        <li>Toàn bộ tính năng của gói Free</li>
+        <li>Tính năng cao cấp cho SaaS workflow</li>
+        <li>Kích hoạt tự động qua webhook thanh toán</li>
+        <li>Ưu tiên xử lý và hỗ trợ 24/7</li>
+      </ul>
+
+      {% if not request.user.is_authenticated %}
+        <a class="btn btn-primary" href="{% url 'accounts:register' %}">Bắt đầu ngay</a>
+      {% elif is_pro %}
+        <button class="btn btn-disabled" disabled>Đang kích hoạt</button>
+      {% else %}
+        <form method="post" action="{% url 'payments:checkout_create' 'pro' %}">
+          {% csrf_token %}
+          <button class="btn btn-primary" type="submit">Nâng cấp lên Pro</button>
+        </form>
+      {% endif %}
+    </article>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Đăng ký{% endblock %}
+
+{% block content %}
+<section class="card auth-card register-card">
+  <h1>Tạo tài khoản</h1>
+  <p class="muted">Điền thông tin bên dưới để bắt đầu sử dụng SaaS Boilerplate.</p>
+
+  <form method="post" class="form-grid auth-form" novalidate>
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="form-alert">
+        {% for error in form.non_field_errors %}{{ error }}{% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="form-row two-cols">
+      <div class="form-field">
+        <label for="{{ form.first_name.id_for_label }}">{{ form.first_name.label }}</label>
+        {{ form.first_name }}
+        {% for error in form.first_name.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+      <div class="form-field">
+        <label for="{{ form.last_name.id_for_label }}">{{ form.last_name.label }}</label>
+        {{ form.last_name }}
+        {% for error in form.last_name.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-field">
+        <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+        {{ form.username }}
+        {% for error in form.username.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-field">
+        <label for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+        {{ form.email }}
+        {% for error in form.email.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="form-row two-cols">
+      <div class="form-field">
+        <label for="{{ form.password1.id_for_label }}">{{ form.password1.label }}</label>
+        {{ form.password1 }}
+        {% for error in form.password1.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+      <div class="form-field">
+        <label for="{{ form.password2.id_for_label }}">{{ form.password2.label }}</label>
+        {{ form.password2 }}
+        {% for error in form.password2.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label class="checkbox-field" for="{{ form.terms.id_for_label }}">
+        {{ form.terms }}
+        <span>{{ form.terms.label }}</span>
+      </label>
+      {% for error in form.terms.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+    </div>
+
+    <button class="btn btn-primary" type="submit">Đăng ký</button>
+  </form>
+  <p class="muted">Đã có tài khoản? <a href="{% url 'accounts:login' %}">Đăng nhập</a>.</p>
+</section>
+{% endblock %}

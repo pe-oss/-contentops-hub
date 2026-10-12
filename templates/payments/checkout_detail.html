@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Thanh toán đơn {{ order.order_code }}{% endblock %}
+
+{% block content %}
+<section class="checkout-page">
+  <div class="dashboard-header">
+    <div>
+      <p class="eyebrow">Thanh toán</p>
+      <h1>Hoàn tất nâng cấp Pro</h1>
+      <p class="muted">Quét mã QR hoặc chuyển khoản thủ công đúng số tiền và nội dung bên dưới.</p>
+    </div>
+    <div class="nav-links">
+      <a class="btn" href="{% url 'pricing' %}">Bảng giá</a>
+      <a class="btn btn-primary" href="{% url 'dashboard' %}">Dashboard</a>
+    </div>
+  </div>
+
+  <div class="checkout-grid">
+    <article class="card checkout-summary">
+      <h2>Thông tin đơn hàng</h2>
+      <dl class="summary-list">
+        <div><dt>Mã đơn hàng</dt><dd><code>{{ order.order_code }}</code></dd></div>
+        <div><dt>Gói dịch vụ</dt><dd>{{ order.get_plan_display }}</dd></div>
+        <div><dt>Số tiền</dt><dd><strong>{{ amount_display }} đ</strong></dd></div>
+        <div><dt>Trạng thái</dt><dd><span class="badge">{{ order.get_status_display }}</span></dd></div>
+      </dl>
+
+      <div class="transfer-note">
+        <strong>Nội dung chuyển khoản bắt buộc:</strong>
+        <code>{{ order.order_code }}</code>
+      </div>
+
+      {% if account_no %}
+        <p class="muted">Tài khoản nhận: <strong>{{ account_no }}</strong>{% if account_name %} - {{ account_name }}{% endif %}{% if bank_id %} ({{ bank_id }}){% endif %}</p>
+      {% else %}
+        <p class="form-alert">Chưa cấu hình tài khoản VietQR. Vui lòng điền VIETQR_BANK_ID và VIETQR_ACCOUNT_NO trong .env để hiển thị QR chuyển khoản.</p>
+      {% endif %}
+
+      <button class="btn btn-primary" type="button" id="check-order-status">Kiểm tra trạng thái đơn hàng</button>
+      <p class="helptext" id="order-status-message">Hệ thống sẽ tự động kiểm tra mỗi 5 giây.</p>
+    </article>
+
+    <article class="card qr-card">
+      <h2>Quét mã VietQR</h2>
+      {% if vietqr_url %}
+        <img class="qr-image" src="{{ vietqr_url }}" alt="VietQR cho đơn {{ order.order_code }}">
+      {% else %}
+        <div class="empty-state">QR chưa khả dụng vì thiếu cấu hình ngân hàng.</div>
+      {% endif %}
+      <ol class="checkout-steps">
+        <li>Mở ứng dụng ngân hàng và quét mã QR.</li>
+        <li>Kiểm tra số tiền chính xác: <strong>{{ amount_display }} đ</strong>.</li>
+        <li>Giữ nguyên nội dung chuyển khoản: <strong>{{ order.order_code }}</strong>.</li>
+        <li>Gói Pro sẽ tự kích hoạt khi webhook xác nhận đã nhận tiền.</li>
+      </ol>
+    </article>
+  </div>
+</section>
+
+<script>
+  (() => {
+    const statusUrl = "{{ status_url }}";
+    const message = document.getElementById("order-status-message");
+    const button = document.getElementById("check-order-status");
+
+    async function checkStatus() {
+      try {
+        const response = await fetch(statusUrl, {headers: {"X-Requested-With": "XMLHttpRequest"}});
+        const data = await response.json();
+        if (data.paid) {
+          message.textContent = "Thanh toán thành công! Đang chuyển về Dashboard...";
+          window.location.href = data.redirect_url;
+          return;
+        }
+        message.textContent = `Trạng thái hiện tại: ${data.status_display}. Vui lòng chờ webhook xác nhận.`;
+      } catch (error) {
+        message.textContent = "Không thể kiểm tra trạng thái lúc này. Vui lòng thử lại sau.";
+      }
+    }
+
+    button.addEventListener("click", checkStatus);
+    setInterval(checkStatus, 5000);
+  })();
+</script>
+{% endblock %}
