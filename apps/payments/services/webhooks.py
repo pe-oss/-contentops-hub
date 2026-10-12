@@ -54,6 +54,8 @@ def _resolve_user(user_lookup: str):
 
 
 def process_payment_webhook(gateway: str, payload: dict) -> tuple[str, Order | None]:
+    if not getattr(settings, "BILLING_ENABLED", False):
+        raise ValueError("billing_disabled")
     normalized = normalize_payment_payload(gateway, payload)
     if not normalized.transaction_id:
         raise ValueError("missing_transaction_id")

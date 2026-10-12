@@ -1,9 +1,10 @@
 # ContentOps Hub (SaaS Boilerplate)
 
-Boilerplate nền tảng Django phục vụ dự án ContentOps Hub, tích hợp sẵn xác thực người dùng, bảng điều khiển và cấu hình thanh toán.
+Boilerplate nền tảng Django phục vụ dự án ContentOps Hub (SaaS-mini-001), tích hợp sẵn xác thực người dùng, bảng điều khiển và kiến trúc phân tách môi trường runtime.
 
 ## 1. Yêu cầu hệ thống
-- Python 3.10+
+- Python 3.12 (khuyến nghị Python 3.12.7+)
+- Django 5.2 LTS (pin `Django==5.2.18`)
 - Git
 
 ## 2. Thiết lập môi trường
@@ -11,13 +12,13 @@ Boilerplate nền tảng Django phục vụ dự án ContentOps Hub, tích hợp
 ### Khởi tạo Virtual Environment
 Trên Windows (PowerShell):
 ```powershell
-python -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
 Trên macOS / Linux:
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
@@ -31,28 +32,46 @@ Tạo file `.env` từ file mẫu `.env.example`:
 ```bash
 cp .env.example .env
 ```
-- Mặc định chạy local sử dụng SQLite (`DATABASE_URL=` để trống).
-- Đặt `SECRET_KEY` riêng cho môi trường local.
-- Cập nhật `ALLOWED_HOSTS=localhost,127.0.0.1`.
+- **ENVIRONMENT**: `local` (mặc định) hoặc `production`.
+- **DEBUG**: `True` cho local, `False` bắt buộc cho production.
+- **BILLING_ENABLED**: Mặc định `False`. Ẩn toàn bộ CTA bảng giá/thanh toán, khóa các route checkout, order, pricing và webhook ở backend.
+- **SECRET_KEY**: Local có thể để trống (tự fallback key dev). Production từ chối khởi động nếu thiếu hoặc dùng key mặc định/insecure.
+- **DATABASE_URL**: 
+  - Local: Để trống để tự động fallback sang SQLite (`db.sqlite3`).
+  - Production: Bắt buộc cấu hình chuỗi kết nối PostgreSQL (`postgresql://...`). Production sẽ từ chối khởi động (fail-fast) nếu thiếu hoặc nếu dùng SQLite.
 
-## 4. Chạy Migration & Kiểm tra
-```bash
-python manage.py check
-python manage.py migrate
+## 4. Chạy Migration & Kiểm tra Local
+```powershell
+.\.venv\Scripts\python.exe manage.py check
+.\.venv\Scripts\python.exe manage.py migrate
 ```
 
 ## 5. Khởi động ứng dụng Local
-```bash
-python manage.py runserver 127.0.0.1:8000
+```powershell
+.\.venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000
 ```
 Truy cập ứng dụng tại: `http://127.0.0.1:8000/`
 
-## 6. Trạng thái và giới hạn kiểm thử
+## 6. Quy trình Build & Triển khai (Deploy)
+- **Bước Build (`build.sh`):** Chỉ thực hiện cài đặt dependencies và thu thập static files:
+  ```bash
+  pip install -r requirements.txt
+  python manage.py collectstatic --no-input
+  ```
+- **Bước Release Migration:** Quá trình migration CSDL được tách riêng khỏi bước build để tránh xung đột khi scale nhiều web worker và đảm bảo kiểm soát rollback.
+  - Trên Render: Cấu hình `preDeployCommand: python manage.py migrate` trong `render.yaml`.
+  - Trên Docker/Kubernetes: Chạy migration qua one-off job hoặc entrypoint script có kiểm soát trước khi scale web replicas.
+  - **Lưu ý an toàn:** Không tự động chạy migration vào cơ sở dữ liệu production từ xa mà không có kế hoạch sao lưu.
+
+## 7. Trạng thái và giới hạn kiểm thử (B00.1)
 - **Đã kiểm thử đạt:**
-  - Luồng xác thực tài khoản: Đăng ký, đăng nhập (bằng username hoặc email), đăng xuất, đổi mật khẩu.
-  - Phân quyền & truy cập Dashboard cho người dùng ẩn danh và người dùng đã xác thực.
-  - Khả năng hiển thị giao diện trên Desktop và màn hình thiết bị di động (responsive qua CSS media queries).
-- **Giới hạn hiện tại:**
-  - Chưa gọi cổng thanh toán thực tế (PayOS / SePay) và chưa kích hoạt webhook thật.
-  - Chưa gửi email hay thông báo Telegram thật.
-  - Chưa triển khai các nghiệp vụ tính năng Content (Spec B00).
+  - Python 3.12 runtime và Django 5.2.18 LTS tương thích hoàn toàn.
+  - Phân tách cấu hình Local vs Production: Production fail-fast khi thiếu `SECRET_KEY` hoặc `DATABASE_URL`, hoặc khi cấu hình SQLite cho production.
+  - `BILLING_ENABLED=False`: Ẩn bảng giá trên header, trang chủ và dashboard; backend trả về 404 cho `/pricing/`, `/payments/checkout/...`, và webhooks; ngăn chặn gọi Telegram/thanh toán.
+  - Staticfiles với `STORAGES` và WhiteNoise hoạt động bình thường kể cả khi `DEBUG=False`.
+  - Luồng auth: Đăng ký, đăng nhập (email/username), đăng xuất, đổi mật khẩu hoạt động ổn định.
+- **Giới hạn hiện tại (chưa thực hiện trong B00.1):**
+  - Môi trường máy chưa có dịch vụ PostgreSQL local nên chưa chạy migration trên database PostgreSQL thực tế tại máy (đã kiểm thử psycopg2 driver import thành công).
+  - Chưa triển khai Email identity / verification (nhiệm vụ B00.2).
+  - Chưa triển khai Workspace, phân quyền nghiệp vụ và các chức năng content (B01 trở đi).
+

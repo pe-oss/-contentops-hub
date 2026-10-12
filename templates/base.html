@@ -14,7 +14,9 @@
     <div class="container nav-inner">
       <a class="brand" href="{% url 'home' %}">SaaS Boilerplate</a>
       <nav class="nav-links">
-        <a class="btn" href="{% url 'pricing' %}">Bảng giá</a>
+        {% if BILLING_ENABLED %}
+          <a class="btn" href="{% url 'pricing' %}">Bảng giá</a>
+        {% endif %}
         {% if request.user.is_authenticated %}
           <span class="muted">Xin chào, {{ request.user.username }}</span>
           <a class="btn btn-primary" href="{% url 'dashboard' %}">Dashboard</a>

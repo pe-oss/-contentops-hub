@@ -7,7 +7,7 @@ from urllib.parse import quote
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import HttpRequest, JsonResponse
+from django.http import Http404, HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -52,6 +52,8 @@ def _build_vietqr_url(order: Order) -> str:
 
 @require_GET
 def pricing_view(request: HttpRequest):
+    if not getattr(settings, "BILLING_ENABLED", False):
+        raise Http404("Tính năng thanh toán hiện chưa được kích hoạt.")
     is_pro = _user_has_pro(request.user)
     context = {
         "is_pro": is_pro,
@@ -64,6 +66,8 @@ def pricing_view(request: HttpRequest):
 @login_required
 @require_POST
 def create_checkout_order(request: HttpRequest, plan_type: str):
+    if not getattr(settings, "BILLING_ENABLED", False):
+        raise Http404("Tính năng thanh toán hiện chưa được kích hoạt.")
     plan_type = plan_type.lower()
     if plan_type != PaymentHistory.Plan.PRO:
         messages.error(request, "Gói dịch vụ không hợp lệ.")
@@ -87,6 +91,8 @@ def create_checkout_order(request: HttpRequest, plan_type: str):
 @login_required
 @require_GET
 def checkout_detail(request: HttpRequest, order_id: int):
+    if not getattr(settings, "BILLING_ENABLED", False):
+        raise Http404("Tính năng thanh toán hiện chưa được kích hoạt.")
     order = get_object_or_404(Order, id=order_id, user=request.user)
     if order.status == Order.Status.PAID:
         messages.success(request, "Đơn hàng đã thanh toán. Gói Pro đã được kích hoạt.")
@@ -107,6 +113,8 @@ def checkout_detail(request: HttpRequest, order_id: int):
 @login_required
 @require_GET
 def checkout_status(request: HttpRequest, order_id: int) -> JsonResponse:
+    if not getattr(settings, "BILLING_ENABLED", False):
+        return JsonResponse({"status": "error", "message": "Billing is disabled"}, status=404)
     order = get_object_or_404(Order, id=order_id, user=request.user)
     paid = order.status == Order.Status.PAID
     return JsonResponse(
@@ -173,6 +181,8 @@ def _handle_payment_webhook(request: HttpRequest, gateway: str) -> JsonResponse:
 @csrf_exempt
 @require_POST
 def payos_webhook(request: HttpRequest) -> JsonResponse:
+    if not getattr(settings, "BILLING_ENABLED", False):
+        return _json_error("Billing is disabled", 404)
     signature = request.headers.get("x-payos-signature") or request.headers.get("signature")
     if not _verify_payos_signature(request.body, signature):
         return _json_error("invalid_signature", 401)
@@ -182,6 +192,8 @@ def payos_webhook(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_POST
 def sepay_webhook(request: HttpRequest) -> JsonResponse:
+    if not getattr(settings, "BILLING_ENABLED", False):
+        return _json_error("Billing is disabled", 404)
     if not _verify_sepay_secret(request):
         return _json_error("invalid_authorization", 401)
     return _handle_payment_webhook(request, PaymentHistory.Provider.SEPAY)

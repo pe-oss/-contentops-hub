@@ -15,6 +15,9 @@ def _escape_markdown(value: object) -> str:
 
 
 def send_telegram_payment_notification(order, transaction_data: dict) -> bool:
+    if not getattr(settings, "BILLING_ENABLED", False):
+        logger.info("Telegram notification skipped: BILLING_ENABLED is False.")
+        return False
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
     if not token or not chat_id:

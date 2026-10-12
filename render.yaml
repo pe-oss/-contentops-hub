@@ -1,16 +1,21 @@
 services:
   - type: web
-    name: saas-boilerplate-app
+    name: contentops-hub
     runtime: python
     plan: free
     buildCommand: ./build.sh
+    preDeployCommand: python manage.py migrate
     startCommand: gunicorn core.wsgi:application
     envVars:
       - key: PYTHON_VERSION
-        value: "3.10.11"
+        value: "3.12.7"
+      - key: ENVIRONMENT
+        value: "production"
       - key: DJANGO_SETTINGS_MODULE
         value: core.settings
       - key: DEBUG
+        value: "False"
+      - key: BILLING_ENABLED
         value: "False"
       - key: SECRET_KEY
         generateValue: true

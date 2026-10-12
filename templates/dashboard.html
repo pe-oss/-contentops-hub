@@ -8,9 +8,15 @@
     <div>
       <p class="eyebrow">Dashboard</p>
       <h1>Xin chào, {{ request.user.username }}</h1>
-      <p class="muted">Quản lý tài khoản, gói dịch vụ và lịch sử thanh toán của bạn.</p>
+      {% if BILLING_ENABLED %}
+        <p class="muted">Quản lý tài khoản, gói dịch vụ và lịch sử thanh toán của bạn.</p>
+      {% else %}
+        <p class="muted">Quản lý thông tin tài khoản của bạn.</p>
+      {% endif %}
     </div>
-    <span class="badge {% if subscription_status == 'Pro' %}badge-pro{% endif %}">{{ subscription_status }}</span>
+    {% if BILLING_ENABLED and subscription_status %}
+      <span class="badge {% if subscription_status == 'Pro' %}badge-pro{% endif %}">{{ subscription_status }}</span>
+    {% endif %}
   </div>
 
   <div class="dashboard-grid">
@@ -22,12 +28,20 @@
       <span class="muted">Email</span>
       <strong>{{ request.user.email|default:"Chưa cập nhật" }}</strong>
     </article>
-    <article class="card stat-card">
-      <span class="muted">Gói dịch vụ</span>
-      <strong>{{ subscription_status }}</strong>
-    </article>
+    {% if BILLING_ENABLED %}
+      <article class="card stat-card">
+        <span class="muted">Gói dịch vụ</span>
+        <strong>{{ subscription_status }}</strong>
+      </article>
+    {% else %}
+      <article class="card stat-card">
+        <span class="muted">Họ và tên</span>
+        <strong>{{ request.user.get_full_name|default:"Chưa cập nhật" }}</strong>
+      </article>
+    {% endif %}
   </div>
 
+  {% if BILLING_ENABLED %}
   <section class="card payment-card">
     <div class="section-title">
       <h2>Lịch sử thanh toán</h2>
@@ -65,5 +79,6 @@
       <p class="empty-state">Bạn chưa có giao dịch thanh toán nào. Tài khoản hiện đang ở gói Free.</p>
     {% endif %}
   </section>
+  {% endif %}
 </section>
 {% endblock %}
