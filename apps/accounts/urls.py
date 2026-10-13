@@ -2,7 +2,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import path, reverse_lazy
 
 from .forms import EmailOrUsernameAuthenticationForm
-from .views import RegisterView
+from .views import RegisterView, ResendVerificationEmailView, VerifyEmailView
 
 app_name = "accounts"
 
@@ -17,6 +17,8 @@ urlpatterns = [
     ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("register/", RegisterView.as_view(), name="register"),
+    path("verify-email/<str:uidb64>/<str:token>/", VerifyEmailView.as_view(), name="verify_email"),
+    path("resend-verification/", ResendVerificationEmailView.as_view(), name="resend_verification"),
     path(
         "password-change/",
         auth_views.PasswordChangeView.as_view(

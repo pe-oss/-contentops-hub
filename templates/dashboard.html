@@ -19,6 +19,19 @@
     {% endif %}
   </div>
 
+  {% if request.user.email_identity and not request.user.email_identity.is_verified %}
+  <div class="card" style="border-left: 4px solid #f9ab00; background: #fef7e0; padding: 12px 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+    <div>
+      <strong style="color: #b06000;">Email chưa được xác minh:</strong>
+      <span style="color: #5f6368; font-size: 14px;">Vui lòng xác minh địa chỉ email <strong>{{ request.user.email }}</strong> để mở khóa đầy đủ tính năng.</span>
+    </div>
+    <form method="post" action="{% url 'accounts:resend_verification' %}" style="margin: 0;">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm" style="background: #e37400; color: #fff; font-size: 13px; padding: 6px 12px;">Gửi lại email xác minh</button>
+    </form>
+  </div>
+  {% endif %}
+
   <div class="dashboard-grid">
     <article class="card stat-card">
       <span class="muted">Username</span>
@@ -27,6 +40,11 @@
     <article class="card stat-card">
       <span class="muted">Email</span>
       <strong>{{ request.user.email|default:"Chưa cập nhật" }}</strong>
+      {% if request.user.email_identity and request.user.email_identity.is_verified %}
+        <span class="badge" style="background:#e6f4ea; color:#137333; margin-top:4px; font-size:12px; display:inline-block; width:fit-content;">Đã xác minh</span>
+      {% else %}
+        <span class="badge" style="background:#fce8e6; color:#c5221f; margin-top:4px; font-size:12px; display:inline-block; width:fit-content;">Chưa xác minh</span>
+      {% endif %}
     </article>
     {% if BILLING_ENABLED %}
       <article class="card stat-card">

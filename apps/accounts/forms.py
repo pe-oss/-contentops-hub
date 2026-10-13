@@ -1,6 +1,10 @@
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.contrib.auth.models import User
+from django.db import transaction
+
+from .models import AccountEmailIdentity
+from .services import normalize_email, send_verification_email
 
 
 class CustomUserCreationForm(UserCreationForm):
@@ -63,19 +67,28 @@ class CustomUserCreationForm(UserCreationForm):
         self.fields["password2"].error_messages.update({"password_mismatch": "Hai mật khẩu không khớp."})
 
     def clean_email(self):
-        email = self.cleaned_data["email"].strip().lower()
-        if User.objects.filter(email__iexact=email).exists():
+        email = normalize_email(self.cleaned_data["email"])
+        if AccountEmailIdentity.objects.filter(normalized_email=email).exists() or User.objects.filter(email__iexact=email).exists():
             raise forms.ValidationError("Email này đã được sử dụng bởi tài khoản khác.")
         return email
 
+    @transaction.atomic
     def save(self, commit=True):
         user = super().save(commit=False)
         user.first_name = self.cleaned_data["first_name"].strip()
         user.last_name = self.cleaned_data["last_name"].strip()
-        user.email = self.cleaned_data["email"]
+        norm_email = normalize_email(self.cleaned_data["email"])
+        user.email = norm_email
         if commit:
             user.save()
+            identity, _ = AccountEmailIdentity.objects.get_or_create(
+                user=user,
+                defaults={"normalized_email": norm_email, "verified_at": None},
+            )
+            # Gửi email xác minh
+            send_verification_email(user)
         return user
+
 
 
 class EmailOrUsernameAuthenticationForm(AuthenticationForm):

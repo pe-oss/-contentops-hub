@@ -6,12 +6,12 @@
 
 - **Spec cơ sở:** `docs/Spec-Ban-Content-Marketing-v1.0.md` (Phiên bản v1.0).
 - **Mốc xuất phát:** Nhánh `chore/boilerplate-baseline` (commit `4fd4046`).
-- **Nhánh hiện tại:** `chore/b00-runtime-config`.
+- **Nhánh hiện tại:** `feat/b00-email-identity` (tiếp nối commit `10104d7`).
 
 | Giai đoạn / Nhiệm vụ | Trạng thái | Ghi chú |
 |---|---|---|
 | **B00.1 — Chuẩn hóa môi trường & cấu hình** | **HOÀN TẤT** | Python 3.12, Django 5.2.18, `BILLING_ENABLED=False`, STORAGES, fail-fast production |
-| **B00.2 — Chuẩn hóa Email identity & verification** | CHƯA LÀM | Phạm vi lượt tiếp theo |
+| **B00.2 — Chuẩn hóa Email identity & verification** | **HOÀN TẤT** | AccountEmailIdentity unique, chặn login mơ hồ, token verification, rate limit, migration backfill an toàn |
 | **B01 — Kiến trúc Workspace & Phân quyền nghiệp vụ** | CHƯA LÀM | Spec mục 3, 5, 8, 18 |
 | **B02 — Quản lý Chiến dịch & Content Calendar** | CHƯA LÀM | Spec mục 6, 9 |
 | **B03 — Pipeline Sinh nội dung & AI Gateway (BYOK)** | CHƯA LÀM | Spec mục 10, 11 |
@@ -55,15 +55,50 @@
 
 ---
 
-## 3. Kết quả Kiểm thử (Validation)
+## 3. Chi tiết thực hiện B00.2 (Email Identity & Verification)
 
-- **Django Check:** `manage.py check` đạt 0 lỗi.
-- **Django Migrations:** `manage.py migrate` chạy hoàn tất trên database SQLite local.
-- **Bộ kiểm thử tự động (Unit / Integration Tests):** 15 tests trong `core/tests_b00_runtime.py` đều `PASSED (OK)`:
-  - 5 tests kiểm tra fail-fast cấu hình production (thiếu secret, secret insecure, debug bật trên prod, thiếu database url, sqlite trên prod).
-  - 8 tests kiểm tra `BILLING_ENABLED=False` (chặn 404 cho pricing, checkout, webhooks, ẩn CTA trên landing và dashboard).
-  - 1 test kiểm tra quy trình xác thực người dùng: Đăng ký, đăng nhập bằng email hoặc username, đăng xuất, đổi mật khẩu.
-  - 1 test kiểm tra khả năng phục vụ static files qua WhiteNoise.
-- **Phần chưa kiểm tra thực tế (ghi rõ):**
-  - Môi trường máy chưa cài đặt PostgreSQL engine nội bộ nên chưa chạy migration trên database PostgreSQL thực tế tại máy (chỉ đã kiểm thử import và tương thích driver psycopg2-binary).
-  - Chưa kết nối hay kiểm thử database PostgreSQL từ xa (tuân thủ nguyên tắc không tự ý kết nối database thật).
+### 3.1. Model `AccountEmailIdentity` & Database Constraints
+- Tạo model `AccountEmailIdentity` quan hệ OneToOne với `User` (`related_name="email_identity"`).
+- `normalized_email`: `EmailField(unique=True, db_index=True)` chuẩn hóa chữ thường và loại bỏ khoảng trắng thừa, đảm bảo ràng buộc unique thực sự ở mức Database thay vì chỉ ở form.
+- `verified_at`: `DateTimeField(null=True, blank=True)` lưu mốc thời gian xác minh. Thuộc tính `is_verified` trả về `True` nếu đã xác minh.
+- `last_verification_sent_at`: `DateTimeField` hỗ trợ kiểm soát rate-limiting.
+
+### 3.2. Data Migration An toàn (Spec 17.4)
+- Migration `0001_initial.py`: Khởi tạo bảng `accounts_accountemailidentity`.
+- Migration `0002_backfill_email_identities.py`: Backfill dữ liệu từ `User.email`:
+  - Quét toàn bộ người dùng hiện có trong database.
+  - Kiểm tra tính hợp lệ và trùng lặp email: nếu phát hiện bất kỳ tài khoản nào có email trống, không hợp lệ hoặc trùng lặp giữa nhiều tài khoản, migration lập tức **DỪNG LẠI (`RuntimeError`)** và in danh sách chi tiết các tài khoản vi phạm để quản trị viên xử lý thủ công, tuyệt đối không tự ý gộp/xóa tài khoản.
+  - Backfill các tài khoản hợp lệ sang `AccountEmailIdentity` ở trạng thái chưa xác minh (`verified_at=None`), yêu cầu xác minh trước khi nhận lời mời workspace.
+
+### 3.3. Xử lý Chống Đăng nhập Mơ hồ (Ambiguous Login Prevention)
+- Tái cấu trúc `EmailOrUsernameModelBackend`:
+  - Khi người dùng đăng nhập bằng chuỗi định danh: tìm đồng thời identity theo email và user theo username.
+  - Nếu chuỗi đăng nhập khớp đồng thời username của User A và email của User B (User A != User B), backend từ chối xác thực ngay lập tức (`return None`), ghi log cảnh báo và không bao giờ chọn tùy tiện tài khoản đầu tiên (`order_by("id").first()`).
+  - Nếu có nhiều hơn 1 bản ghi khớp trong cùng một tiêu chí tìm kiếm, từ chối xác thực ngay lập tức.
+
+### 3.4. Service Layer, Token Verification & Rate Limiting
+- `apps/accounts/services.py`:
+  - `normalize_email()`: chuẩn hóa email nhất quán.
+  - `create_user_with_identity()`: tạo User và AccountEmailIdentity trong một transaction atomic, kiểm tra unique ở CSDL, tự động gửi email xác minh.
+  - `update_user_email()`: cập nhật email trong transaction, kiểm tra unique, tự động reset `verified_at = None` và gửi lại email xác minh.
+  - `email_verification_token_generator`: mở rộng từ `PasswordResetTokenGenerator`, hash bao gồm user id, password, email và timestamp, tự động hết hạn và tự động vô hiệu hóa nếu mật khẩu hoặc email thay đổi.
+  - `send_verification_email()`: hỗ trợ rate limit cooldown 60 giây (`can_send_verification_email`).
+  - `verify_email_token()`: kiểm tra token an toàn và cập nhật `verified_at = timezone.now()`.
+
+### 3.5. Web Views & Giao diện Dashboard
+- Thêm routes `/auth/verify-email/<uidb64>/<token>/` và `/auth/resend-verification/`.
+- Cập nhật `CustomUserCreationForm` để gọi transaction atomic tạo User và Identity.
+- Cập nhật `dashboard.html`:
+  - Hiển thị badge trạng thái "Đã xác minh" (xanh) hoặc "Chưa xác minh" (đỏ).
+  - Hiển thị banner nhắc nhở kèm nút bấm gửi lại email xác minh nếu tài khoản chưa xác minh email.
+
+---
+
+## 4. Kết quả Kiểm thử (Validation)
+
+- **PostgreSQL Database:** Đã kết nối và xác nhận trực tiếp trên PostgreSQL 17.11 (Supabase Session Pooler).
+- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`) áp dụng thành công 100% trên PostgreSQL.
+- **Toàn bộ Bộ kiểm thử tự động (31/31 tests Passed):**
+  - **15 tests** `core/tests_b00_runtime.py`: Pass 100% (fail-fast, billing disabled, auth cơ bản, staticfiles).
+  - **16 tests** `core/tests_b00_email_identity.py`: Pass 100% (chuẩn hóa email, ràng buộc unique DB, reset verification khi đổi email, chặn đăng nhập mơ hồ giữa 2 user khác nhau, chu kỳ tạo/xác minh token an toàn, rate limit cooldown 60s, migration backfill dừng khi gặp duplicate/invalid email, luồng giao diện đăng ký & xác minh).
+
