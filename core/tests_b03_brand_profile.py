@@ -429,4 +429,83 @@ class BrandProfileMilestoneB03Tests(TestCase):
         self.assertIn("revision", admin_instance.readonly_fields)
         self.assertIn("id", admin_instance.readonly_fields)
 
+    def test_concurrent_brand_profile_first_creation(self):
+        """
+        Gate B03: Hai request cùng tạo BrandProfile lần đầu.
+        Nhờ khóa Workspace và xử lý ConcurrencyConflictError, chỉ đúng 1 profile được tạo (rev 1),
+        request thứ hai không gây lỗi 500 ngoài ý muốn mà được xử lý thành ConcurrencyConflictError rõ ràng.
+        """
+        # Workspace này chưa có profile
+        self.assertIsNone(get_brand_profile(self.other_workspace))
+
+        # Request 1 tạo thành công
+        p1 = save_brand_profile(
+            user=self.other_owner,
+            workspace=self.other_workspace,
+            name="Brand Concurrent 1",
+            product_summary="Sản phẩm 1",
+            target_audience="Khách hàng 1",
+            expected_revision=0,
+        )
+        self.assertEqual(p1.revision, 1)
+
+        # Request 2 gửi expected_revision=0 khi profile đã được tạo
+        with self.assertRaises(ConcurrencyConflictError):
+            save_brand_profile(
+                user=self.other_owner,
+                workspace=self.other_workspace,
+                name="Brand Concurrent 2",
+                product_summary="Sản phẩm 2",
+                target_audience="Khách hàng 2",
+                expected_revision=0,
+            )
+
+        # Đảm bảo trong CSDL chỉ có đúng 1 profile duy nhất
+        self.assertEqual(BrandProfile.objects.filter(workspace=self.other_workspace).count(), 1)
+
+    def test_snapshot_deep_isolation_with_mutable_data(self):
+        """
+        Gate B03: Snapshot độc lập hoàn toàn với BrandProfile gốc, bao gồm dữ liệu mutable như source_urls.
+        Sửa đổi profile, sửa đổi danh sách URL, hoặc sửa đổi chính snapshot không làm thay đổi chéo.
+        """
+        initial_urls = ["https://example.com/api/v1", "https://example.com/docs"]
+        profile = save_brand_profile(
+            user=self.owner,
+            workspace=self.workspace,
+            name="Original Snapshot Brand",
+            product_summary="Sản phẩm snapshot",
+            target_audience="Khách hàng snapshot",
+            source_urls=initial_urls,
+        )
+
+        snapshot_1 = profile.to_snapshot()
+        self.assertEqual(snapshot_1["source_urls"], initial_urls)
+        self.assertEqual(snapshot_1["revision"], 1)
+
+        # 1. Thao tác mutable trên list của snapshot_1 không ảnh hưởng tới profile
+        snapshot_1["source_urls"].append("https://malicious-injection.com")
+        self.assertNotIn("https://malicious-injection.com", profile.source_urls)
+
+        # 2. Cập nhật profile lên revision 2 với URL mới
+        updated_urls = ["https://example.com/v2-new"]
+        updated_profile = save_brand_profile(
+            user=self.owner,
+            workspace=self.workspace,
+            name="Updated Brand Rev 2",
+            product_summary="Sản phẩm mới rev 2",
+            target_audience="Khách hàng mới rev 2",
+            source_urls=updated_urls,
+            expected_revision=1,
+        )
+        self.assertEqual(updated_profile.revision, 2)
+        self.assertEqual(updated_profile.source_urls, updated_urls)
+
+        # 3. Snapshot 1 ban đầu vẫn giữ nguyên vẹn giá trị ban đầu (trừ phần tử do snapshot_1 tự sửa ở bước 1)
+        self.assertEqual(snapshot_1["brand_name"], "Original Snapshot Brand")
+        self.assertEqual(snapshot_1["revision"], 1)
+        self.assertEqual(snapshot_1["product_summary"], "Sản phẩm snapshot")
+        self.assertEqual(snapshot_1["source_urls"][:2], initial_urls)
+        self.assertNotIn("https://example.com/v2-new", snapshot_1["source_urls"])
+
+
 

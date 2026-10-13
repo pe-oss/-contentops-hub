@@ -422,18 +422,20 @@ class BrandProfile(models.Model):
         """
         Xuất snapshot bất biến của hồ sơ thương hiệu tại revision hiện tại.
         Dùng để nhúng vào Gói nội dung (Packages) theo Spec F02 và AC15.
-        Snapshot này hoàn toàn độc lập, không bị thay đổi khi BrandProfile cập nhật sau đó.
+        Snapshot này hoàn toàn độc lập với BrandProfile gốc, bao gồm các dữ liệu mutable như source_urls.
+        Sửa hồ sơ hoặc danh sách URL sau đó tuyệt đối không làm thay đổi dữ liệu của snapshot đã xuất.
+        Lưu ý: Chưa đánh dấu tích hợp vào gói content khi Milestone B04 chưa hoàn tất.
         """
         return {
             "brand_profile_id": str(self.id),
-            "brand_name": self.name,
-            "product_summary": self.product_summary,
-            "target_audience": self.target_audience,
-            "tone_of_voice": self.tone_of_voice,
-            "avoid_guidelines": self.avoid_guidelines,
-            "allowed_claims": self.allowed_claims,
-            "source_urls": list(self.source_urls or []),
-            "revision": self.revision,
+            "brand_name": str(self.name),
+            "product_summary": str(self.product_summary),
+            "target_audience": str(self.target_audience),
+            "tone_of_voice": str(self.tone_of_voice or ""),
+            "avoid_guidelines": str(self.avoid_guidelines or ""),
+            "allowed_claims": str(self.allowed_claims or ""),
+            "source_urls": [str(u) for u in (self.source_urls or [])],
+            "revision": int(self.revision),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 

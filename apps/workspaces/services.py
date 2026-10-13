@@ -608,7 +608,10 @@ def save_brand_profile(
     if workspace.owner_user_id != user.id:
         raise PermissionDenied("Thông tin Chủ workspace không nhất quán.")
 
-    # 2. Khóa dòng BrandProfile để đảm bảo tính tuần tự
+    # 2. Khóa dòng Workspace để tuần tự hóa thao tác (kể cả khi BrandProfile chưa tồn tại)
+    Workspace.objects.select_for_update().filter(id=workspace.id).first()
+
+    # Khóa dòng BrandProfile để đảm bảo tính tuần tự
     brand_profile = (
         BrandProfile.objects.select_for_update()
         .filter(workspace=workspace)
@@ -656,6 +659,12 @@ def save_brand_profile(
             updated_by=user,
         )
         brand_profile.full_clean()
-        brand_profile.save()
+        try:
+            with transaction.atomic():
+                brand_profile.save()
+        except IntegrityError:
+            raise ConcurrencyConflictError(
+                "Hồ sơ thương hiệu đã được tạo ở một phiên khác. Vui lòng tải lại trang."
+            )
         return brand_profile
 
