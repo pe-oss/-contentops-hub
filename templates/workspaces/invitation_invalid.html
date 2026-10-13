@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Lời mời không hợp lệ hoặc đã hết hạn{% endblock %}
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card" style="max-width:520px; margin:0 auto;">
+    <div style="font-size:36px; margin-bottom:8px;">⛔</div>
+    <p class="eyebrow">Trạng thái lời mời</p>
+    <h2>Lời mời không thể sử dụng</h2>
+
+    {% if error_message %}
+      <p style="color:#c5221f;">{{ error_message }}</p>
+    {% elif invitation.is_accepted %}
+      <p class="muted">Lời mời tham gia workspace <strong>{{ invitation.workspace.name }}</strong> đã được chấp nhận trước đó.</p>
+    {% elif invitation.is_revoked %}
+      <p class="muted">Lời mời này đã bị thu hồi bởi Chủ workspace <strong>{{ invitation.workspace.name }}</strong>.</p>
+    {% elif invitation.is_expired %}
+      <p class="muted">Lời mời tham gia workspace <strong>{{ invitation.workspace.name }}</strong> đã hết hạn hiệu lực (quá 7 ngày).</p>
+    {% else %}
+      <p class="muted">Lời mời không hợp lệ hoặc không còn tồn tại trên hệ thống.</p>
+    {% endif %}
+
+    <div style="margin-top:24px;">
+      <a href="{% url 'dashboard' %}" class="btn btn-primary">Về Trang chủ / Dashboard</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

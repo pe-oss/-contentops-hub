@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Lời mời đã tạo thành công — {{ workspace.name }}{% endblock %}
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card" style="max-width:580px; margin:0 auto;">
+    <div style="font-size:36px; margin-bottom:8px;">🎉</div>
+    <h2>Đã tạo lời mời thành công!</h2>
+    <p class="muted">
+      Lời mời gửi tới <strong>{{ invitation.email }}</strong> đã được tạo.
+      Theo Spec 3.2, Chủ tự sao chép liên kết dưới đây để gửi trực tiếp cho người nhận:
+    </p>
+
+    <div class="card" style="background:#f8f9fa; border:1px solid var(--border); margin:16px 0; padding:16px;">
+      <label style="font-size:12px; color:var(--muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:6px;">
+        Liên kết nhận lời mời (Hiệu lực 7 ngày):
+      </label>
+      <input type="text" readonly value="{{ accept_url }}" id="inviteUrlInput" class="form-control" style="font-family:monospace; font-size:13px; background:#fff;" onclick="this.select();">
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button type="button" class="btn btn-sm btn-primary" onclick="navigator.clipboard.writeText(document.getElementById('inviteUrlInput').value); alert('Đã sao chép liên kết!');">
+          Sao chép liên kết
+        </button>
+      </div>
+    </div>
+
+    <ul style="font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:24px; padding-left:20px;">
+      <li>Người nhận cần đăng nhập bằng tài khoản có email đã xác minh là <code>{{ invitation.email }}</code>.</li>
+      <li>Liên kết chỉ có thể sử dụng thành công duy nhất một lần.</li>
+      <li>Liên kết sẽ hết hạn vào lúc: <strong>{{ invitation.expires_at|date:"d/m/Y H:i" }}</strong>.</li>
+    </ul>
+
+    <div style="display:flex; gap:12px;">
+      <a href="{% url 'workspaces:members' workspace.id %}" class="btn btn-primary">Quay lại danh sách thành viên</a>
+      <a href="{% url 'workspaces:invite' workspace.id %}" class="btn">+ Mời thêm người khác</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -151,3 +151,129 @@ class Membership(models.Model):
     @property
     def is_active(self) -> bool:
         return self.status == MembershipStatus.ACTIVE
+
+class InvitationStatus(models.TextChoices):
+    PENDING = "PENDING", "Đang chờ"
+    ACCEPTED = "ACCEPTED", "Đã chấp nhận"
+    REVOKED = "REVOKED", "Đã thu hồi"
+    EXPIRED = "EXPIRED", "Đã hết hạn"
+
+
+class Invitation(models.Model):
+    """
+    Lời mời tham gia workspace gửi tới một địa chỉ email.
+    Theo Spec mục 3.2 và 9:
+    - Token được lưu dạng SHA-256 hash (token_hash unique), không lưu raw token trong CSDL.
+    - Hết hạn sau 7 ngày, dùng một lần duy nhất.
+    - Không thể mời vai trò OWNER.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="invitations",
+        verbose_name="Workspace",
+    )
+    email = models.EmailField(
+        max_length=254,
+        db_index=True,
+        verbose_name="Email được mời (đã chuẩn hóa)",
+    )
+    token_hash = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        verbose_name="Mã băm token (SHA-256)",
+    )
+    access_role = models.CharField(
+        max_length=20,
+        choices=AccessRole.choices,
+        default=AccessRole.MEMBER,
+        verbose_name="Vai trò được mời",
+    )
+    employment_type = models.CharField(
+        max_length=20,
+        choices=EmploymentType.choices,
+        default=EmploymentType.IN_HOUSE,
+        verbose_name="Hình thức quan hệ",
+    )
+    ai_use_allowed = models.BooleanField(
+        default=False,
+        verbose_name="Cho phép dùng AI",
+    )
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_workspace_invitations",
+        verbose_name="Người gửi lời mời",
+    )
+    expires_at = models.DateTimeField(verbose_name="Thời điểm hết hạn")
+    accepted_at = models.DateTimeField(null=True, blank=True, verbose_name="Thời điểm chấp nhận")
+    revoked_at = models.DateTimeField(null=True, blank=True, verbose_name="Thời điểm thu hồi")
+    last_sent_at = models.DateTimeField(null=True, blank=True, verbose_name="Thời điểm gửi gần nhất")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Thời điểm tạo")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Thời điểm cập nhật")
+
+    class Meta:
+        verbose_name = "Lời mời Workspace"
+        verbose_name_plural = "Lời mời Workspace"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "email"], name="idx_invitation_ws_email"),
+            models.Index(fields=["token_hash"], name="idx_invitation_token_hash"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Lời mời {self.email} -> {self.workspace.name} ({self.status_display})"
+
+    @property
+    def is_pending(self) -> bool:
+        from django.utils import timezone
+
+        return (
+            self.accepted_at is None
+            and self.revoked_at is None
+            and self.expires_at > timezone.now()
+        )
+
+    @property
+    def is_expired(self) -> bool:
+        from django.utils import timezone
+
+        return (
+            self.accepted_at is None
+            and self.revoked_at is None
+            and self.expires_at <= timezone.now()
+        )
+
+    @property
+    def is_accepted(self) -> bool:
+        return self.accepted_at is not None
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+    @property
+    def status_display(self) -> str:
+        if self.is_accepted:
+            return "Đã chấp nhận"
+        if self.is_revoked:
+            return "Đã thu hồi"
+        if self.is_expired:
+            return "Đã hết hạn"
+        return "Đang chờ"
+
+    def clean(self) -> None:
+        super().clean()
+        if self.access_role == AccessRole.OWNER:
+            raise ValidationError("Không thể tạo lời mời cho vai trò Chủ workspace (OWNER).")
+

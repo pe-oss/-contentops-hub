@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Email không khớp — Lời mời Workspace{% endblock %}
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card" style="max-width:520px; margin:0 auto;">
+    <div style="font-size:36px; margin-bottom:8px;">🔒</div>
+    <p class="eyebrow">Quy tắc bảo mật (Spec 3.2)</p>
+    <h2>Tài khoản không khớp email được mời</h2>
+    <p class="muted">
+      Lời mời này được gửi đích danh tới email <strong>{{ invitation.email }}</strong>.
+      Tuy nhiên tài khoản bạn đang đăng nhập lại sử dụng email <strong>{{ current_user_email }}</strong>.
+    </p>
+
+    <div class="card" style="background:#fce8e6; border:1px solid #fad2cf; margin:16px 0; padding:16px; font-size:14px; color:#c5221f;">
+      Vui lòng đăng xuất và đăng nhập bằng tài khoản có email <strong>{{ invitation.email }}</strong> để chấp nhận lời mời.
+    </div>
+
+    <div style="display:flex; gap:12px; margin-top:20px;">
+      <form method="post" action="{% url 'accounts:logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary">Đăng xuất tài khoản này</button>
+      </form>
+      <a href="{% url 'dashboard' %}" class="btn">Về Dashboard</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

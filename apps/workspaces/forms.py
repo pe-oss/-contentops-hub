@@ -78,3 +78,53 @@ class WorkspaceUpdateForm(forms.Form):
         if not tz or tz not in zoneinfo.available_timezones():
             raise forms.ValidationError("Múi giờ không hợp lệ theo chuẩn IANA.")
         return tz
+
+
+from .models import EmploymentType
+
+
+class WorkspaceInvitationForm(forms.Form):
+    email = forms.EmailField(
+        label="Địa chỉ email",
+        max_length=254,
+        widget=forms.EmailInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "nguoidung@example.com",
+                "autofocus": True,
+            }
+        ),
+        help_text="Email của người bạn muốn mời tham gia workspace. Họ sẽ cần đăng nhập bằng tài khoản có email này.",
+    )
+    employment_type = forms.ChoiceField(
+        choices=EmploymentType.choices,
+        initial=EmploymentType.IN_HOUSE,
+        label="Hình thức quan hệ",
+        widget=forms.Select(attrs={"class": "form-control"}),
+        help_text="Nội bộ (IN_HOUSE) hoặc Freelancer / Đối tác ngoài (FREELANCER).",
+    )
+    ai_use_allowed = forms.BooleanField(
+        required=False,
+        initial=False,
+        label="Cho phép dùng AI",
+        help_text="Cấp quyền sử dụng tính năng AI (BYOK) cho thành viên này.",
+    )
+
+    def clean_email(self) -> str:
+        email = (self.cleaned_data.get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            raise forms.ValidationError("Địa chỉ email không hợp lệ.")
+        return email
+
+
+class MemberUpdateForm(forms.Form):
+    employment_type = forms.ChoiceField(
+        choices=EmploymentType.choices,
+        label="Hình thức quan hệ",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    ai_use_allowed = forms.BooleanField(
+        required=False,
+        label="Cho phép dùng AI",
+    )
+

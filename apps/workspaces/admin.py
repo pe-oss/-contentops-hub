@@ -73,3 +73,30 @@ class MembershipAdmin(admin.ModelAdmin):
             raise ValidationError("Không thể chuyển vai trò của Chủ workspace sang vai trò khác.")
 
         super().save_model(request, obj, form, change)
+
+
+from .models import Invitation
+
+
+@admin.register(Invitation)
+class InvitationAdmin(admin.ModelAdmin):
+    list_display = (
+        "email",
+        "workspace",
+        "access_role",
+        "employment_type",
+        "invited_by",
+        "expires_at",
+        "accepted_at",
+        "revoked_at",
+        "created_at",
+    )
+    list_filter = ("access_role", "employment_type", "created_at")
+    search_fields = ("email", "workspace__name", "invited_by__username")
+    readonly_fields = ("id", "token_hash", "created_at", "updated_at", "accepted_at", "revoked_at", "last_sent_at")
+
+    def save_model(self, request, obj, form, change):
+        if obj.access_role == AccessRole.OWNER:
+            raise ValidationError("Không thể tạo lời mời cho vai trò OWNER.")
+        super().save_model(request, obj, form, change)
+

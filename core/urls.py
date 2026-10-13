@@ -3,6 +3,7 @@ from django.urls import include, path
 from django.views.generic import TemplateView
 
 from apps.payments.views import pricing_view
+from apps.workspaces.views import InvitationAcceptView
 
 from .views import dashboard
 
@@ -13,5 +14,6 @@ urlpatterns = [
     path("dashboard/", dashboard, name="dashboard"),
     path("auth/", include("apps.accounts.urls")),
     path("workspaces/", include("apps.workspaces.urls")),
+    path("invitations/accept/<str:token>/", InvitationAcceptView.as_view(), name="root_invitation_accept"),
     path("payments/", include("apps.payments.urls")),
 ]

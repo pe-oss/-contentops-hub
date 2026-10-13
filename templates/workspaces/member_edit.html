@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Cập nhật thành viên {{ target_member.user.username }} — {{ workspace.name }}{% endblock %}
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card" style="max-width:520px; margin:0 auto;">
+    <p class="eyebrow">Workspace: {{ workspace.name }}</p>
+    <h2>Cập nhật thành viên: {{ target_member.user.username }}</h2>
+    <p class="muted">Email: {{ target_member.user.email_identity.normalized_email|default:target_member.user.email }}</p>
+
+    <form method="post">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="alert alert-error">
+          {% for err in form.non_field_errors %}<p style="margin:0;">{{ err }}</p>{% endfor %}
+        </div>
+      {% endif %}
+
+      <div class="form-group" style="margin-bottom:16px;">
+        <label for="{{ form.employment_type.id_for_label }}"><strong>{{ form.employment_type.label }}</strong></label>
+        {{ form.employment_type }}
+      </div>
+
+      <div class="form-group" style="margin-bottom:20px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          {{ form.ai_use_allowed }}
+          <span><strong>{{ form.ai_use_allowed.label }}</strong></span>
+        </label>
+        <small class="muted">Cho phép thành viên chạy các tác vụ AI (BYOK) khi được giao bài.</small>
+      </div>
+
+      <div style="display:flex; gap:12px; align-items:center;">
+        <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        <a href="{% url 'workspaces:members' workspace.id %}" class="btn">Hủy</a>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

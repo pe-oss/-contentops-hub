@@ -6,15 +6,15 @@
 
 - **Spec cơ sở:** `docs/Spec-Ban-Content-Marketing-v1.0.md` (Phiên bản v1.0).
 - **Mốc xuất phát:** Nhánh `chore/boilerplate-baseline` (commit `4fd4046`).
-- **Nhánh hiện tại:** `feat/b01-workspaces` (tiếp nối nhánh `feat/b00-email-identity`, commit `9c589fb`).
+- **Nhánh hiện tại:** `feat/b02-workspace-members` (tiếp nối nhánh `feat/b01-workspaces`, commit `447fdd9`).
 
 | Giai đoạn / Nhiệm vụ | Trạng thái | Ghi chú |
 |---|---|---|
 | **B00.1 — Chuẩn hóa môi trường & cấu hình** | **HOÀN TẤT** | Python 3.12, Django 5.2.18, `BILLING_ENABLED=False`, STORAGES, fail-fast production |
 | **B00.2 — Chuẩn hóa Email identity & verification** | **HOÀN TẤT** | AccountEmailIdentity unique, chặn login mơ hồ, token verification, rate limit, migration backfill an toàn |
 | **B01 — Workspace & Cách ly dữ liệu (Tenant Isolation)** | **HOÀN TẤT** | Workspace UUID, membership OWNER nguyên tử, cách ly truy cập 404, kiểm soát quyền sửa 403, chống giả mạo |
-| **B02 — Thành viên, Lời mời & Phân quyền chi tiết** | CHƯA LÀM | Spec mục 3.2, 8, 18 (Dừng trước B02 theo yêu cầu) |
-| **B03 — Pipeline Sinh nội dung & AI Gateway (BYOK)** | CHƯA LÀM | Spec mục 10, 11 |
+| **B02 — Thành viên, Lời mời & Phân quyền chi tiết** | **HOÀN TẤT** | Spec mục 3.1, 3.2, 9, 10, 13 (Lời mời token SHA-256 hash, hạn 7 ngày, nhận atomic lock DB, ma trận quyền OWNER/MEMBER, bảo vệ Chủ) |
+| **B03 — Pipeline Sinh nội dung & AI Gateway (BYOK)** | CHƯA LÀM | Spec mục 10, 11 (Dừng trước B03 theo yêu cầu) |
 | **B04 — Quality Gate & Duyệt bài (Review/Approval)** | CHƯA LÀM | Spec mục 12, 13 |
 | **B05 — Publishing Channel Adapters & Automation** | CHƯA LÀM | Spec mục 14, 15 |
 | **B06 — Analytics, Performance Loop & Audit Trail** | CHƯA LÀM | Spec mục 16, 17, 19 |
@@ -152,30 +152,74 @@
 
 ---
 
+## 5. Chi tiết thực hiện B02 (Thành viên, Lời mời & Phân quyền chi tiết)
 
-## 5. Kết quả Kiểm thử & Cách ly Database (Validation)
+### 5.1. Mô hình `Invitation` & Bảo mật Token (Spec mục 3.2 & 9)
+- **Mô hình `Invitation` (`apps/workspaces/models.py`):**
+  - Khóa chính: `id` kiểu `UUIDField` (`default=uuid.uuid4`, editable=False).
+  - Khóa ngoại: `workspace` (`ForeignKey` trỏ `Workspace`, `on_delete=models.CASCADE`, `related_name="invitations"`).
+  - Email: `email` (chuẩn hóa theo cơ chế `AccountEmailIdentity.normalize_email`, db_index=True).
+  - Hash Token: `token_hash` (`CharField(max_length=64, unique=True, db_index=True)`), lưu băm SHA-256 của token an toàn (`secrets.token_urlsafe(32)`). Tuyệt đối không lưu raw token trong CSDL và không log raw token hoặc URL đầy đủ.
+  - Vai trò: `access_role` mặc định `MEMBER`. Ràng buộc `clean()` chặn cứng không cho phép mời vai trò `OWNER`.
+  - Hình thức quan hệ: `employment_type` (`IN_HOUSE` hoặc `FREELANCER`).
+  - Cờ quyền AI: `ai_use_allowed` (`BooleanField`, mặc định False).
+  - Người mời: `invited_by` (`ForeignKey` trỏ `User`, `on_delete=models.SET_NULL`, nullable).
+  - Thời hạn: `expires_at` (mặc định 7 ngày theo Spec 3.2), `accepted_at` (nullable), `revoked_at` (nullable), `last_sent_at` (nullable).
+  - Ràng buộc Index: `idx_invitation_ws_email` và `idx_invitation_token_hash`.
+- **Migration:** `workspaces.0002_invitation` đã được tạo và áp dụng.
+
+### 5.2. Service Layer Lời mời & Nhận lời mời (`apps/workspaces/services.py`)
+- `create_workspace_invitation()`: Chỉ Chủ (`OWNER`) mới có quyền tạo lời mời. Chuẩn hóa email; từ chối mời nếu đã là thành viên `ACTIVE`; từ chối nếu thành viên đang `INACTIVE` (phải kích hoạt lại thay vì tạo lời mời mới). Gửi email sau commit transaction (`transaction.on_commit`), lỗi mail không làm mất lời mời đã tạo; trả về raw token để Chủ sao chép trực tiếp.
+- `resend_workspace_invitation()`: Chỉ Chủ; áp dụng cooldown 60 giây; sinh token mới và gia hạn 7 ngày.
+- `revoke_workspace_invitation()`: Chỉ Chủ; đánh dấu `revoked_at`; lời mời sau khi thu hồi không thể sử dụng hay gửi lại.
+- `accept_workspace_invitation()`: Bọc `@transaction.atomic` cùng với khóa DB `select_for_update()` trên bản ghi `Invitation` và `Membership`. Yêu cầu đăng nhập và email identity đã xác minh (`AccountEmailIdentity.is_verified == True`). Kiểm tra email đã xác minh khớp chính xác với `invitation.email`. Cấp `Membership` theo dữ liệu lời mời, không tin dữ liệu client. Đánh dấu `accepted_at`, bảo đảm chống race condition khi có nhiều request đồng thời.
+
+### 5.3. Quản trị Thành viên & Bảo vệ Chủ (Member Management & Owner Guards)
+- `update_member_settings()`: Chỉ Chủ được sửa `employment_type` và `ai_use_allowed` của thành viên.
+- `deactivate_membership()`: Chỉ Chủ được vô hiệu hóa thành viên (`status=INACTIVE`). **Bảo vệ Chủ tuyệt đối:** ném `ValidationError` nếu cố tình vô hiệu hóa Chủ workspace (`membership.user_id == workspace.owner_user_id` hoặc `access_role == OWNER`).
+- `reactivate_membership()`: Kích hoạt lại thành viên đã bị vô hiệu hóa (`status=ACTIVE`).
+- **Hiệu lực tức thì:** Khi thành viên bị vô hiệu hóa, `get_workspace_for_user()` trả về 404 ngay ở request kế tiếp; context processor lập tức dọn session key `active_workspace_id`.
+
+### 5.4. Giao diện Người dùng & Ranh giới Phân quyền (Templates & Views)
+- `templates/workspaces/workspace_members.html`: Danh sách thành viên trong workspace và danh sách lời mời (dành riêng cho Chủ).
+- `templates/workspaces/workspace_invite.html` & `workspace_invite_success.html`: Form gửi lời mời và trang hiển thị liên kết để Chủ sao chép trực tiếp.
+- `templates/workspaces/member_edit.html`: Form sửa thiết lập thành viên.
+- `templates/workspaces/invitation_accept.html`: Trang tiếp nhận và nút POST chấp nhận lời mời có CSRF.
+- `templates/workspaces/invitation_unverified.html`: Hướng dẫn xác minh email nếu tài khoản chưa xác minh.
+- `templates/workspaces/invitation_mismatch.html`: Cảnh báo khi tài khoản đăng nhập không khớp với email được mời.
+- `templates/workspaces/invitation_invalid.html`: Thông báo khi liên kết hết hạn, đã thu hồi hoặc đã sử dụng.
+
+---
+
+
+
+## 6. Kết quả Kiểm thử & Cách ly Database (Validation)
 
 - **PostgreSQL Database & Cách ly Kiểm thử (Test Database Isolation):**
   - Đã kết nối và xác nhận trực tiếp trên PostgreSQL 17.11 (Supabase Session Pooler).
   - **Chứng minh cách ly độc lập:** Cấu hình rõ ràng `DATABASES["default"]["TEST"]` trong `core/settings.py` (hỗ trợ `TEST_DATABASE_URL` và `TEST_DATABASE_NAME`). CSDL ứng dụng thực tế (`postgres`) và CSDL test runner (`test_postgres`) là hai database riêng biệt trong hệ thống PostgreSQL (đã kiểm chứng qua truy vấn kích thước catalog: `postgres` 11 MB, `test_postgres` ~8 MB; bảng người dùng ứng dụng trên `postgres` hoàn toàn không bị ảnh hưởng bởi test).
-- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`, `accounts.0003_accountemailidentity_token_version`, `workspaces.0001_initial`) áp dụng thành công 100% trên PostgreSQL.
-- **Toàn bộ Bộ kiểm thử tự động (56/56 tests Passed):**
+- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`, `accounts.0003_accountemailidentity_token_version`, `workspaces.0001_initial`, `workspaces.0002_invitation`) áp dụng thành công 100% trên PostgreSQL.
+- **Toàn bộ Bộ kiểm thử tự động (74/74 tests Passed):**
   - **15 tests** `core/tests_b00_runtime.py`: Pass 100% (fail-fast, billing disabled, auth cơ bản, staticfiles).
   - **26 tests** `core/tests_b00_email_identity.py`: Pass 100% (chuẩn hóa email, single-use token, atomic concurrency lock `select_for_update`, out-of-transaction email, SMTP error handling, signals & admin write-path sync).
-  - **15 tests** `core/tests_b01_workspaces.py`: Pass 100%:
+  - **15 tests** `core/tests_b01_workspaces.py`: Pass 100% (tenant isolation, single-owner consistency, HTTP 403/404, session fallback).
+  - **18 tests** `core/tests_b02_workspace_members.py`: Pass 100%:
     1. Xác nhận test runner chạy trên database test độc lập (`test_postgres`).
-    2. Người dùng chưa đăng nhập bị chặn (chuyển hướng 302 về login) trên tất cả các routes workspace.
-    3. Tạo workspace atomic sinh đúng 1 `Membership(OWNER, IN_HOUSE, ACTIVE, ai_use_allowed=True)`, không cấp staff/superuser.
-    4. Validation tên (1-100 ký tự, strip whitespace, không rỗng) và múi giờ IANA.
-    5. Rollback atomic khi gặp lỗi: không để lại workspace hoặc membership mồ côi/dở dang.
-    6. Danh sách workspace hiển thị riêng cho từng user; người chưa có workspace thấy hướng dẫn và CTA tạo mới.
-    7. Cách ly dữ liệu: người ngoài workspace truy cập trực tiếp bằng ID (detail, edit, switch) nhận 404 (chống enumeration).
-    8. Client không thể giả mạo `owner_user` hoặc `access_role` để leo thang đặc quyền.
-    9. Ràng buộc CSDL `UniqueConstraint(workspace, user)` từ chối tạo trùng membership.
-    10. Membership bị vô hiệu hóa (`INACTIVE`) lập tức mất quyền ở request kế tiếp, kể cả session còn lưu ID cũ.
-    11. Vai trò `MEMBER` xem được tổng quan (200), nhưng truy cập hoặc POST sửa thông tin workspace bị chặn 403 (`PermissionDenied`).
-    12. Người dùng tham gia nhiều workspace chuyển đổi trơn tru và session cập nhật đúng ranh giới.
-    13. Các đường ghi bảo toàn tính nhất quán một Chủ duy nhất, từ chối tạo lệch giữa `owner_user` và `OWNER`.
-    14. Admin model save bảo toàn tính nhất quán giữa `owner_user` và `Membership OWNER`.
-    15. Context processor tự động dọn session khi membership bị vô hiệu và fallback an toàn sang workspace active khác.
+    2. Ma trận quyền B02: Chủ có quyền mời/sửa/thu hồi, thành viên bị chặn 403 khi thao tác quản trị, người ngoài nhận 404 khi truy cập workspace ID.
+    3. Tạo lời mời thành công, email chuẩn hóa, token lưu dạng SHA-256 hash (64 hex), raw token không lọt vào DB.
+    4. Chặn tạo lời mời với vai trò OWNER (ValidationError).
+    5. Chặn tạo lời mời trùng đang chờ xử lý cho cùng một email.
+    6. Chặn mời người đã là thành viên ACTIVE hoặc INACTIVE (phải kích hoạt lại qua quản lý thành viên).
+    7. Gửi email sau commit; lỗi gửi mail không rollback lời mời đã tạo.
+    8. Gửi lại có cooldown 60s; sau khi thu hồi không thể nhận hoặc gửi lại.
+    9. Nhận lời mời yêu cầu đăng nhập (redirect kèm next parameter) và email identity đã xác minh.
+    10. Tài khoản có email khác bị chặn không được chấp nhận lời mời của email được mời.
+    11. Nhận lời mời thành công qua POST có CSRF, tạo Membership ACTIVE (role MEMBER, đúng employment_type và ai_use_allowed), cập nhật session active workspace.
+    12. Ràng buộc token an toàn: dùng một lần duy nhất, token hết hạn bị chặn, token đã thu hồi bị chặn, token giả mạo trả 404 không lộ workspace.
+    13. Bảo vệ Chủ workspace: cấm vô hiệu hóa hoặc hạ quyền Chủ.
+    14. Hiệu lực tức thì sau khi vô hiệu hóa: thành viên bị vô hiệu hóa nhận ngay 404 ở request kế tiếp, session bị xóa bỏ.
+    15. Chủ cập nhật `employment_type` và `ai_use_allowed` của thành viên thành công.
+    16. Chủ kích hoạt lại thành viên đã bị vô hiệu hóa thành công.
+    17. Lời mời bị thu hồi trước khi nhận bị chặn.
+    18. Kiểm thử cạnh tranh song song (`WorkspaceConcurrencyB02Tests`): hai request nhận đồng thời chỉ đúng 1 request thành công, không sinh membership trùng nhờ `select_for_update()` và ràng buộc DB.
 

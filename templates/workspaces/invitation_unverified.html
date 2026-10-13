@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Yêu cầu xác minh email — Lời mời Workspace{% endblock %}
+{% block content %}
+<section class="auth-page">
+  <div class="auth-card" style="max-width:520px; margin:0 auto;">
+    <div style="font-size:36px; margin-bottom:8px;">⚠️</div>
+    <p class="eyebrow">Yêu cầu bảo mật</p>
+    <h2>Cần xác minh email</h2>
+    <p class="muted">
+      Theo quy tắc bảo mật hệ thống (Spec 3.2), bạn cần <strong>xác minh email</strong> của tài khoản
+      trước khi có thể chấp nhận lời mời gia nhập workspace <strong>{{ invitation.workspace.name }}</strong>.
+    </p>
+
+    <div class="card" style="background:#fff8e1; border:1px solid #ffe082; margin:16px 0; padding:16px; font-size:14px; color:#5d4037;">
+      Email tài khoản hiện tại của bạn là <strong>{{ user_email }}</strong> và chưa được xác minh.
+    </div>
+
+    <div style="display:flex; gap:12px; margin-top:20px;">
+      <a href="{% url 'accounts:resend_verification' %}" class="btn btn-primary">Gửi lại email xác minh</a>
+      <a href="{% url 'dashboard' %}" class="btn">Về Dashboard</a>
+    </div>
+  </div>
+</section>
+{% endblock %}
