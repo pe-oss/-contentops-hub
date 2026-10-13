@@ -286,3 +286,205 @@ class BrandProfileForm(forms.Form):
             cleaned.append(u)
         return cleaned
 
+from .models import Membership, MembershipStatus
+
+
+class PackageForm(forms.Form):
+    name = forms.CharField(
+        max_length=150,
+        label="Tên gói nội dung",
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "Ví dụ: Chiến dịch Tuyển sinh Quý 4", "autofocus": True}
+        ),
+        help_text="1–150 ký tự.",
+    )
+    objective = forms.CharField(
+        max_length=3000,
+        label="Mục tiêu của gói",
+        widget=forms.Textarea(
+            attrs={"class": "form-control", "rows": 3, "placeholder": "Mục tiêu truyền thông, định vị và kết quả kỳ vọng..."}
+        ),
+        help_text="1–3.000 ký tự.",
+    )
+    coordinator_membership = forms.ModelChoiceField(
+        queryset=Membership.objects.none(),
+        label="Thành viên điều phối",
+        widget=forms.Select(attrs={"class": "form-control"}),
+        help_text="Người chịu trách nhiệm điều phối tiến độ của gói.",
+    )
+    start_date = forms.DateField(
+        label="Ngày bắt đầu",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+    )
+    end_date = forms.DateField(
+        label="Ngày kết thúc",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+    )
+    channel = forms.CharField(
+        initial="FACEBOOK",
+        required=False,
+        label="Kênh xuất bản",
+        widget=forms.TextInput(attrs={"class": "form-control", "readonly": "readonly"}),
+        help_text="Kênh cố định FACEBOOK trong phiên bản R1.",
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+    def __init__(self, *args, workspace=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if workspace:
+            self.workspace = workspace
+            self.fields["coordinator_membership"].queryset = (
+                Membership.objects.filter(workspace=workspace, status=MembershipStatus.ACTIVE)
+                .select_related("user")
+                .order_by("user__first_name", "user__email")
+            )
+            self.fields["coordinator_membership"].label_from_instance = (
+                lambda m: f"{m.user.get_full_name() or m.user.username} ({m.user.email})"
+            )
+
+    def clean_name(self) -> str:
+        name = (self.cleaned_data.get("name") or "").strip()
+        if not name:
+            raise forms.ValidationError("Tên gói nội dung không được để trống.")
+        if len(name) > 150:
+            raise forms.ValidationError("Tên gói nội dung không được vượt quá 150 ký tự.")
+        return name
+
+    def clean_objective(self) -> str:
+        obj = (self.cleaned_data.get("objective") or "").strip()
+        if not obj:
+            raise forms.ValidationError("Mục tiêu của gói không được để trống.")
+        if len(obj) > 3000:
+            raise forms.ValidationError("Mục tiêu không được vượt quá 3.000 ký tự.")
+        return obj
+
+    def clean(self):
+        cleaned_data = super().clean()
+        start = cleaned_data.get("start_date")
+        end = cleaned_data.get("end_date")
+        if start and end and end < start:
+            self.add_error("end_date", "Ngày kết thúc không được trước ngày bắt đầu.")
+        return cleaned_data
+class ContentItemForm(forms.Form):
+    title = forms.CharField(
+        max_length=200,
+        label="Tiêu đề bài viết",
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "Ví dụ: 5 bí quyết luyện nghe IELTS Band 7.0+", "autofocus": True}
+        ),
+        help_text="1–200 ký tự.",
+    )
+    brief = forms.CharField(
+        max_length=5000,
+        label="Brief / Yêu cầu nội dung",
+        widget=forms.Textarea(
+            attrs={"class": "form-control", "rows": 4, "placeholder": "Yêu cầu chi tiết, góc tiếp cận, thông điệp chính..."}
+        ),
+        help_text="1–5.000 ký tự.",
+    )
+    cta = forms.CharField(
+        max_length=500,
+        required=False,
+        label="Kêu gọi hành động (CTA)",
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Ví dụ: Đăng ký nhận tài liệu miễn phí tại link bên dưới"}),
+        help_text="Tối đa 500 ký tự. Tùy chọn.",
+    )
+    writing_deadline = forms.DateTimeField(
+        label="Hạn hoàn thành viết bài",
+        widget=forms.DateTimeInput(attrs={"class": "form-control", "type": "datetime-local"}),
+    )
+    editing_deadline = forms.DateTimeField(
+        label="Hạn hoàn thành biên tập",
+        widget=forms.DateTimeInput(attrs={"class": "form-control", "type": "datetime-local"}),
+    )
+    review_deadline = forms.DateTimeField(
+        label="Hạn Chủ duyệt",
+        widget=forms.DateTimeInput(attrs={"class": "form-control", "type": "datetime-local"}),
+    )
+    planned_publish_at = forms.DateTimeField(
+        label="Thời điểm dự kiến đăng",
+        widget=forms.DateTimeInput(attrs={"class": "form-control", "type": "datetime-local"}),
+    )
+    writer_membership = forms.ModelChoiceField(
+        queryset=Membership.objects.none(),
+        label="Người viết bài",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    editor_membership = forms.ModelChoiceField(
+        queryset=Membership.objects.none(),
+        label="Người biên tập",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    publisher_membership = forms.ModelChoiceField(
+        queryset=Membership.objects.none(),
+        label="Người xuất bản",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+    def __init__(self, *args, workspace=None, package=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.package = package
+        if workspace:
+            self.workspace = workspace
+            active_members = (
+                Membership.objects.filter(workspace=workspace, status=MembershipStatus.ACTIVE)
+                .select_related("user")
+                .order_by("user__first_name", "user__email")
+            )
+            for f in ["writer_membership", "editor_membership", "publisher_membership"]:
+                self.fields[f].queryset = active_members
+                self.fields[f].label_from_instance = (
+                    lambda m: f"{m.user.get_full_name() or m.user.username} ({m.user.email})"
+                )
+
+    def clean_title(self) -> str:
+        title = (self.cleaned_data.get("title") or "").strip()
+        if not title:
+            raise forms.ValidationError("Tiêu đề bài viết không được để trống.")
+        if len(title) > 200:
+            raise forms.ValidationError("Tiêu đề bài viết không được vượt quá 200 ký tự.")
+        return title
+
+    def clean_brief(self) -> str:
+        b = (self.cleaned_data.get("brief") or "").strip()
+        if not b:
+            raise forms.ValidationError("Brief bài viết không được để trống.")
+        if len(b) > 5000:
+            raise forms.ValidationError("Brief bài viết không được vượt quá 5.000 ký tự.")
+        return b
+
+    def clean(self):
+        cleaned_data = super().clean()
+        w_dl = cleaned_data.get("writing_deadline")
+        e_dl = cleaned_data.get("editing_deadline")
+        r_dl = cleaned_data.get("review_deadline")
+        p_at = cleaned_data.get("planned_publish_at")
+
+        if w_dl and e_dl and w_dl > e_dl:
+            self.add_error("editing_deadline", "Hạn biên tập không được trước hạn viết bài.")
+        if e_dl and r_dl and e_dl > r_dl:
+            self.add_error("review_deadline", "Hạn Chủ duyệt không được trước hạn biên tập.")
+        if r_dl and p_at and r_dl > p_at:
+            self.add_error("planned_publish_at", "Thời điểm dự kiến đăng không được trước hạn Chủ duyệt.")
+
+        if self.package:
+            if self.package.start_date and w_dl and w_dl.date() < self.package.start_date:
+                self.add_error(
+                    "writing_deadline",
+                    f"Hạn viết ({w_dl.date()}) không được trước ngày bắt đầu của gói ({self.package.start_date}).",
+                )
+            if self.package.end_date and p_at and p_at.date() > self.package.end_date:
+                self.add_error(
+                    "planned_publish_at",
+                    f"Thời điểm dự kiến đăng ({p_at.date()}) không được sau ngày kết thúc của gói ({self.package.end_date}).",
+                )
+        return cleaned_data
+
+

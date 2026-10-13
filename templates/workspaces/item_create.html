@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Thêm bài viết vào kế hoạch — {{ package.name }}{% endblock %}
+
+{% block content %}
+<section class="dashboard-page" style="max-width: 720px; margin: 0 auto;">
+  <div class="dashboard-header" style="margin-bottom: 24px;">
+    <p class="eyebrow"><a href="{% url 'workspaces:package_detail' workspace.id package.id %}">← Quay lại gói {{ package.name }}</a></p>
+    <h1>✍️ Thêm bài viết mới vào kế hoạch</h1>
+    <p class="muted">Soạn brief, thiết lập thời hạn từng bước và phân công người thực hiện.</p>
+  </div>
+
+  <div class="card">
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="alert alert-error" style="margin-bottom: 16px;">
+          {% for error in form.non_field_errors %}
+            <div>{{ error }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <div style="margin-bottom: 16px;">
+        <label for="{{ form.title.id_for_label }}"><strong>{{ form.title.label }}</strong> <span style="color: red;">*</span></label>
+        {{ form.title }}
+        {% for error in form.title.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label for="{{ form.brief.id_for_label }}"><strong>{{ form.brief.label }}</strong> <span style="color: red;">*</span></label>
+        {{ form.brief }}
+        {% for error in form.brief.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label for="{{ form.cta.id_for_label }}"><strong>{{ form.cta.label }}</strong></label>
+        {{ form.cta }}
+        {% for error in form.cta.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+      </div>
+
+      <h4 style="margin: 20px 0 12px 0; border-bottom: 1px solid var(--border); padding-bottom: 6px;">Phân công trách nhiệm (3 vị trí)</h4>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;">
+        <div>
+          <label for="{{ form.writer_membership.id_for_label }}"><strong>{{ form.writer_membership.label }}</strong> <span style="color: red;">*</span></label>
+          {{ form.writer_membership }}
+          {% for error in form.writer_membership.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+        </div>
+        <div>
+          <label for="{{ form.editor_membership.id_for_label }}"><strong>{{ form.editor_membership.label }}</strong> <span style="color: red;">*</span></label>
+          {{ form.editor_membership }}
+          {% for error in form.editor_membership.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+        </div>
+        <div>
+          <label for="{{ form.publisher_membership.id_for_label }}"><strong>{{ form.publisher_membership.label }}</strong> <span style="color: red;">*</span></label>
+          {{ form.publisher_membership }}
+          {% for error in form.publisher_membership.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <h4 style="margin: 20px 0 12px 0; border-bottom: 1px solid var(--border); padding-bottom: 6px;">Thời hạn (Thứ tự: Viết &le; Biên tập &le; Duyệt &le; Đăng)</h4>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+        <div>
+          <label for="{{ form.writing_deadline.id_for_label }}"><strong>{{ form.writing_deadline.label }}</strong> <span style="color: red;">*</span></label>
+          {{ form.writing_deadline }}
+          {% for error in form.writing_deadline.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+        </div>
+        <div>
+          <label for="{{ form.editing_deadline.id_for_label }}"><strong>{{ form.editing_deadline.label }}</strong> <span style="color: red;">*</span></label>
+          {{ form.editing_deadline }}
+          {% for error in form.editing_deadline.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+        <div>
+          <label for="{{ form.review_deadline.id_for_label }}"><strong>{{ form.review_deadline.label }}</strong> <span style="color: red;">*</span></label>
+          {{ form.review_deadline }}
+          {% for error in form.review_deadline.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+        </div>
+        <div>
+          <label for="{{ form.planned_publish_at.id_for_label }}"><strong>{{ form.planned_publish_at.label }}</strong> <span style="color: red;">*</span></label>
+          {{ form.planned_publish_at }}
+          {% for error in form.planned_publish_at.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <a href="{% url 'workspaces:package_detail' workspace.id package.id %}" class="btn">Hủy</a>
+        <button type="submit" class="btn btn-primary">Thêm bài viết vào kế hoạch</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

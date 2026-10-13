@@ -652,3 +652,453 @@ class InvitationAcceptView(View):
                 },
             )
 
+from .forms import ContentItemForm, PackageForm
+from .models import PackageStatus
+from .selectors import (
+    get_item_for_workspace,
+    get_item_tasks,
+    get_package_for_workspace,
+    get_package_items,
+    get_workspace_packages,
+)
+from .services import (
+    add_content_item,
+    approve_plan,
+    create_package,
+    update_content_item,
+    update_package,
+)
+
+
+@method_decorator(login_required, name="dispatch")
+class PackageListView(View):
+    def get(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        packages = get_workspace_packages(workspace)
+        is_owner = membership.access_role == AccessRole.OWNER
+
+        return render(
+            request,
+            "workspaces/package_list.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "is_owner": is_owner,
+                "packages": packages,
+            },
+        )
+
+
+@method_decorator(login_required, name="dispatch")
+class PackageCreateView(View):
+    def get(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        if membership.access_role != AccessRole.OWNER:
+            raise PermissionDenied("Chỉ Chủ workspace mới có quyền tạo Gói nội dung.")
+
+        form = PackageForm(workspace=workspace, initial={"coordinator_membership": membership})
+        return render(
+            request,
+            "workspaces/package_create.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "form": form,
+            },
+        )
+
+    def post(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        if membership.access_role != AccessRole.OWNER:
+            raise PermissionDenied("Chỉ Chủ workspace mới có quyền tạo Gói nội dung.")
+
+        form = PackageForm(request.POST, workspace=workspace)
+        if not form.is_valid():
+            return render(
+                request,
+                "workspaces/package_create.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "form": form,
+                },
+                status=400,
+            )
+
+        try:
+            package = create_package(
+                user=request.user,
+                workspace=workspace,
+                name=form.cleaned_data["name"],
+                objective=form.cleaned_data["objective"],
+                coordinator_membership=form.cleaned_data["coordinator_membership"],
+                start_date=form.cleaned_data["start_date"],
+                end_date=form.cleaned_data["end_date"],
+                channel=form.cleaned_data.get("channel") or "FACEBOOK",
+            )
+            messages.success(request, f"Đã tạo gói nội dung '{package.name}' thành công.")
+            return redirect("workspaces:package_detail", workspace_id=workspace.id, package_id=package.id)
+        except ValidationError as exc:
+            form.add_error(None, exc)
+            return render(
+                request,
+                "workspaces/package_create.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "form": form,
+                },
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class PackageDetailView(View):
+    def get(self, request, workspace_id, package_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        items = get_package_items(package)
+        is_owner = membership.access_role == AccessRole.OWNER
+        is_coordinator = package.coordinator_membership_id == membership.id
+
+        can_edit_items = is_owner or (is_coordinator and package.is_draft)
+
+        return render(
+            request,
+            "workspaces/package_detail.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "package": package,
+                "items": items,
+                "is_owner": is_owner,
+                "is_coordinator": is_coordinator,
+                "can_edit_items": can_edit_items,
+            },
+        )
+
+
+@method_decorator(login_required, name="dispatch")
+class PackageUpdateView(View):
+    def get(self, request, workspace_id, package_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        if membership.access_role != AccessRole.OWNER:
+            raise PermissionDenied("Chỉ Chủ workspace mới có quyền sửa Gói nội dung.")
+
+        package = get_package_for_workspace(workspace, package_id)
+        form = PackageForm(
+            workspace=workspace,
+            initial={
+                "name": package.name,
+                "objective": package.objective,
+                "coordinator_membership": package.coordinator_membership,
+                "start_date": package.start_date,
+                "end_date": package.end_date,
+                "channel": package.channel,
+                "expected_row_version": package.row_version,
+            },
+        )
+        return render(
+            request,
+            "workspaces/package_edit.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "package": package,
+                "form": form,
+            },
+        )
+
+    def post(self, request, workspace_id, package_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        if membership.access_role != AccessRole.OWNER:
+            raise PermissionDenied("Chỉ Chủ workspace mới có quyền sửa Gói nội dung.")
+
+        package = get_package_for_workspace(workspace, package_id)
+        form = PackageForm(request.POST, workspace=workspace)
+        if not form.is_valid():
+            return render(
+                request,
+                "workspaces/package_edit.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "package": package,
+                    "form": form,
+                },
+                status=400,
+            )
+
+        expected_row_version = form.cleaned_data.get("expected_row_version")
+        try:
+            update_package(
+                user=request.user,
+                package=package,
+                name=form.cleaned_data["name"],
+                objective=form.cleaned_data["objective"],
+                coordinator_membership=form.cleaned_data["coordinator_membership"],
+                start_date=form.cleaned_data["start_date"],
+                end_date=form.cleaned_data["end_date"],
+                expected_row_version=expected_row_version,
+            )
+            messages.success(request, f"Đã cập nhật gói '{package.name}' thành công.")
+            return redirect("workspaces:package_detail", workspace_id=workspace.id, package_id=package.id)
+        except ConcurrencyConflictError as exc:
+            form.add_error(None, str(exc))
+            return render(
+                request,
+                "workspaces/package_edit.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "package": package,
+                    "form": form,
+                    "conflict_error": str(exc),
+                },
+                status=409,
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+            return render(
+                request,
+                "workspaces/package_edit.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "package": package,
+                    "form": form,
+                },
+                status=400,
+            )
+@method_decorator(login_required, name="dispatch")
+class ContentItemCreateView(View):
+    def get(self, request, workspace_id, package_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        is_owner = membership.access_role == AccessRole.OWNER
+        is_coordinator = package.coordinator_membership_id == membership.id
+
+        if not is_owner and not is_coordinator:
+            raise PermissionDenied("Chỉ Chủ workspace hoặc Người điều phối mới có quyền thêm bài viết.")
+
+        form = ContentItemForm(
+            workspace=workspace,
+            package=package,
+            initial={
+                "writer_membership": membership,
+                "editor_membership": membership,
+                "publisher_membership": membership,
+            },
+        )
+        return render(
+            request,
+            "workspaces/item_create.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "package": package,
+                "form": form,
+            },
+        )
+
+    def post(self, request, workspace_id, package_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        is_owner = membership.access_role == AccessRole.OWNER
+        is_coordinator = package.coordinator_membership_id == membership.id
+
+        if not is_owner and not is_coordinator:
+            raise PermissionDenied("Chỉ Chủ workspace hoặc Người điều phối mới có quyền thêm bài viết.")
+
+        form = ContentItemForm(request.POST, workspace=workspace, package=package)
+        if not form.is_valid():
+            return render(
+                request,
+                "workspaces/item_create.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "package": package,
+                    "form": form,
+                },
+                status=400,
+            )
+
+        try:
+            item = add_content_item(
+                user=request.user,
+                package=package,
+                title=form.cleaned_data["title"],
+                brief=form.cleaned_data["brief"],
+                cta=form.cleaned_data.get("cta", ""),
+                writing_deadline=form.cleaned_data["writing_deadline"],
+                editing_deadline=form.cleaned_data["editing_deadline"],
+                review_deadline=form.cleaned_data["review_deadline"],
+                planned_publish_at=form.cleaned_data["planned_publish_at"],
+                writer_membership=form.cleaned_data["writer_membership"],
+                editor_membership=form.cleaned_data["editor_membership"],
+                publisher_membership=form.cleaned_data["publisher_membership"],
+            )
+            messages.success(request, f"Đã thêm bài viết '{item.title}' vào kế hoạch.")
+            return redirect("workspaces:package_detail", workspace_id=workspace.id, package_id=package.id)
+        except ValidationError as exc:
+            form.add_error(None, exc)
+            return render(
+                request,
+                "workspaces/item_create.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "package": package,
+                    "form": form,
+                },
+                status=400,
+            )
+@method_decorator(login_required, name="dispatch")
+class ContentItemUpdateView(View):
+    def get(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+        is_owner = membership.access_role == AccessRole.OWNER
+        is_coordinator = package.coordinator_membership_id == membership.id
+
+        if package.status == PackageStatus.ACTIVE:
+            if not is_owner:
+                raise PermissionDenied("Khi kế hoạch đã duyệt, chỉ Chủ workspace mới có quyền sửa bài viết.")
+        else:
+            if not is_owner and not is_coordinator:
+                raise PermissionDenied("Chỉ Chủ workspace hoặc Người điều phối mới có quyền sửa bài viết.")
+
+        form = ContentItemForm(
+            workspace=workspace,
+            package=package,
+            initial={
+                "title": item.title,
+                "brief": item.brief,
+                "cta": item.cta,
+                "writing_deadline": item.writing_deadline,
+                "editing_deadline": item.editing_deadline,
+                "review_deadline": item.review_deadline,
+                "planned_publish_at": item.planned_publish_at,
+                "writer_membership": item.writer_membership,
+                "editor_membership": item.editor_membership,
+                "publisher_membership": item.publisher_membership,
+                "expected_row_version": item.row_version,
+            },
+        )
+        return render(
+            request,
+            "workspaces/item_edit.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "package": package,
+                "item": item,
+                "form": form,
+            },
+        )
+
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+        is_owner = membership.access_role == AccessRole.OWNER
+        is_coordinator = package.coordinator_membership_id == membership.id
+
+        if package.status == PackageStatus.ACTIVE:
+            if not is_owner:
+                raise PermissionDenied("Khi kế hoạch đã duyệt, chỉ Chủ workspace mới có quyền sửa bài viết.")
+        else:
+            if not is_owner and not is_coordinator:
+                raise PermissionDenied("Chỉ Chủ workspace hoặc Người điều phối mới có quyền sửa bài viết.")
+
+        form = ContentItemForm(request.POST, workspace=workspace, package=package)
+        if not form.is_valid():
+            return render(
+                request,
+                "workspaces/item_edit.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "package": package,
+                    "item": item,
+                    "form": form,
+                },
+                status=400,
+            )
+
+        expected_row_version = form.cleaned_data.get("expected_row_version")
+        try:
+            update_content_item(
+                user=request.user,
+                item=item,
+                title=form.cleaned_data["title"],
+                brief=form.cleaned_data["brief"],
+                cta=form.cleaned_data.get("cta", ""),
+                writing_deadline=form.cleaned_data["writing_deadline"],
+                editing_deadline=form.cleaned_data["editing_deadline"],
+                review_deadline=form.cleaned_data["review_deadline"],
+                planned_publish_at=form.cleaned_data["planned_publish_at"],
+                writer_membership=form.cleaned_data["writer_membership"],
+                editor_membership=form.cleaned_data["editor_membership"],
+                publisher_membership=form.cleaned_data["publisher_membership"],
+                expected_row_version=expected_row_version,
+            )
+            messages.success(request, f"Đã cập nhật bài viết '{item.title}'.")
+            return redirect("workspaces:package_detail", workspace_id=workspace.id, package_id=package.id)
+        except ConcurrencyConflictError as exc:
+            form.add_error(None, str(exc))
+            return render(
+                request,
+                "workspaces/item_edit.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "package": package,
+                    "item": item,
+                    "form": form,
+                    "conflict_error": str(exc),
+                },
+                status=409,
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+            return render(
+                request,
+                "workspaces/item_edit.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "package": package,
+                    "item": item,
+                    "form": form,
+                },
+                status=400,
+            )
+@method_decorator(login_required, name="dispatch")
+class PackageApprovePlanView(View):
+    def post(self, request, workspace_id, package_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        if membership.access_role != AccessRole.OWNER:
+            raise PermissionDenied("Chỉ Chủ workspace mới có quyền duyệt kế hoạch.")
+
+        package = get_package_for_workspace(workspace, package_id)
+        idempotency_key = request.POST.get("idempotency_key", "").strip()
+
+        try:
+            approve_plan(
+                user=request.user,
+                package=package,
+                idempotency_key=idempotency_key,
+            )
+            messages.success(request, f"Đã phê duyệt kế hoạch cho gói '{package.name}'. Nhiệm vụ đã được khởi tạo!")
+        except (ValidationError, PermissionDenied) as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            messages.error(request, f"Không thể duyệt kế hoạch: {err_msg}")
+
+        return redirect("workspaces:package_detail", workspace_id=workspace.id, package_id=package.id)
+
+
+
+

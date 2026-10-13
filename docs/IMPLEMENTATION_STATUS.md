@@ -270,3 +270,61 @@
     9. Form validation lỗi trả về HTTP 400 và bảo toàn toàn bộ dữ liệu người dùng đã nhập.
     10. Đăng ký quản trị Django Admin cho `BrandProfile` với các trường chỉ đọc `id`, `revision`, `created_at`, `updated_at`.
 
+    11. Cạnh tranh khởi tạo BrandProfile lần đầu: Khóa Workspace và chuyển đổi `IntegrityError` thành `ConcurrencyConflictError` rõ ràng, đảm bảo duy nhất 1 hồ sơ được tạo, không sinh lỗi 500 ngoài ý muốn.
+    12. Tính độc lập sâu của snapshot: Danh sách `source_urls` được copy độc lập dạng chuỗi, thao tác sửa đổi trên profile hoặc trên snapshot không làm biến đổi chéo.
+
+---
+
+## 8. Chi tiết thực hiện B04 (Gói, kế hoạch, phân công - Packages & Planning)
+
+### 8.1. Mô hình dữ liệu B04 & Ràng buộc toàn vẹn CSDL (Spec mục 4, 6.2, 9 & 13)
+- **Mô hình `Package` (`apps/workspaces/models.py`):**
+  - Khóa chính: `id` kiểu `UUIDField` (`default=uuid.uuid4`, editable=False).
+  - Khóa ngoại: `workspace` (ForeignKey), `coordinator_membership` (ForeignKey on_delete=PROTECT).
+  - Các trường: `name` (1–150), `objective` (1–3.000), `channel` ("FACEBOOK"), `start_date`, `end_date`, `status` (`DRAFT`, `ACTIVE`, `COMPLETED`, `CANCELLED`), `plan_revision` (tăng khi sửa scope sau duyệt), `brand_snapshot` (JSONField), `row_version` (PositiveIntegerField OCC).
+- **Mô hình `PlanApproval`:** Lưu `plan_revision`, `immutable_plan_snapshot`, `owner`, `approved_at`, và `idempotency_key` (chống nhấp đôi AC05).
+- **Mô hình `ContentItem`:** Thuộc `workspace` và `package` (tối đa 50 bài/gói). Chứa `title` (1–200), `brief` (1–5.000), `cta` (<=500), `state` (`TODO`, `WRITING`, `EDITING`, `OWNER_REVIEW`, `READY_TO_PUBLISH`, `PUBLISHED`, `CANCELLED`). Hạn định: `writing_deadline <= editing_deadline <= review_deadline <= planned_publish_at`. Phân công 3 vai trò: `writer_membership`, `editor_membership`, `publisher_membership` (phải cùng workspace và ACTIVE).
+- **Mô hình `Task`:** 3 nhiệm vụ `WRITE`, `EDIT`, `PUBLISH` trên mỗi bài (`UniqueConstraint(item, role)`). Trạng thái khởi tạo khi duyệt: WRITE: READY, EDIT & PUBLISH: WAITING.
+- **Migration:** `workspaces.0004_package_contentitem_planapproval_task_and_more` áp dụng thành công.
+### 8.2. Service Layer & Giao dịch Nguyên tử
+- `create_package()`: Chủ workspace tạo gói, chỉ định người điều phối thuộc cùng workspace (ACTIVE).
+- `update_package()`: Chỉnh sửa thông tin gói, kiểm tra optimistic concurrency `row_version`. Nếu gói đã ACTIVE, tăng `plan_revision`.
+- `add_content_item()`: Chủ hoặc Người điều phối thêm bài vào gói DRAFT; kiểm tra giới hạn 50 bài, kiểm tra thứ tự deadline và quan hệ workspace.
+- `update_content_item()`: Sửa bài viết; kiểm tra `row_version`; nếu gói đã ACTIVE chỉ Chủ mới được sửa và tự động cập nhật lại thời hạn/người của các `Task` tương ứng.
+- `approve_plan()`: Duyệt kế hoạch nguyên tử:
+  - Khóa dòng package bằng `select_for_update()`.
+  - Chống nhấp đôi qua `idempotency_key` (AC05): Nếu key đã tồn tại, trả về kết quả cũ, không sinh thêm snapshot hay task.
+  - Kiểm tra điều kiện tiên quyết: kế hoạch phải có ít nhất 1 bài viết, các thành viên được phân công phải đang ACTIVE, hạn bài hợp lệ.
+  - Lưu snapshot thương hiệu bất biến vào `package.brand_snapshot` (AC15).
+  - Lưu snapshot kế hoạch bất biến vào `PlanApproval.immutable_plan_snapshot`.
+  - Chuyển `package.status` từ `DRAFT` sang `ACTIVE`.
+  - Tự động sinh bộ 3 `Task` (WRITE/EDIT/PUBLISH) cho mỗi bài viết.
+
+### 8.3. Ma trận Phân quyền B04 & Giao diện Người dùng
+- **Phân quyền Backend:**
+  - `PackageListView`: Xem danh sách gói trong workspace (Chủ và Thành viên).
+  - `PackageCreateView` & `PackageUpdateView`: Chỉ Chủ workspace có quyền tạo/sửa gói (Thành viên nhận HTTP 403 Forbidden).
+  - `PackageApprovePlanView`: Chỉ Chủ workspace có quyền duyệt kế hoạch (AC03).
+  - `ContentItemCreateView` & `ContentItemUpdateView`: Khi gói DRAFT, Chủ và Người điều phối được thêm/sửa; khi gói ACTIVE, chỉ Chủ mới được sửa bài.
+  - Người ngoài workspace (OUTSIDER) và thành viên bị vô hiệu hóa (INACTIVE) nhận ngay **HTTP 404 Not Found**.
+- **Giao diện Templates:**
+  - `package_list.html`: Danh sách gói, lọc badge trạng thái, thẻ bài viết, empty state.
+  - `package_create.html` & `package_edit.html`: Form tạo và sửa gói, giữ lại nội dung khi lỗi validation, cảnh báo lỗi xung đột phiên bản 409.
+  - `package_detail.html`: Kế hoạch chi tiết, mục tiêu chiến dịch, danh sách bài viết kèm 3 người phân công và 4 mốc thời hạn, nút phê duyệt kế hoạch cho Chủ có xác nhận và idempotency key.
+  - `item_create.html` & `item_edit.html`: Form thêm/sửa bài viết với widget date/time, phân công 3 vị trí.
+  - Tích hợp nút điều hướng "📦 Kế hoạch & Gói bài" trên trang chi tiết Workspace (`workspace_detail.html`).
+
+### 8.4. Kết quả Kiểm thử Tự động B04 (10/10 tests Passed)
+- Kiểm thử `core/tests_b04_packages_planning.py`:
+  1. `test_database_test_isolation`: Test runner chạy trên database test độc lập (`test_postgres`).
+  2. `test_create_package_success_and_validations`: Tạo gói thành công; chặn ngày kết thúc trước ngày bắt đầu.
+  3. `test_create_content_items_and_deadline_sequence_validation`: Thêm bài hợp lệ; chặn hạn sai thứ tự (viết > biên tập) và hạn vượt ngoài khoảng thời gian của gói (AC04).
+  4. `test_approve_plan_full_lifecycle_and_ac04`: Duyệt kế hoạch, lưu snapshot, chuyển DRAFT -> ACTIVE, sinh đúng 3 nhiệm vụ/bài với trạng thái WRITE: READY, EDIT/PUBLISH: WAITING.
+  5. `test_approve_plan_idempotency_double_click_protection_ac05`: Chống nhấp đôi với idempotency key; không sinh dư thừa task hoặc snapshot (AC05).
+  6. `test_brand_snapshot_isolation_after_plan_approval_ac15`: Sửa hồ sơ thương hiệu sau khi duyệt không làm thay đổi snapshot gói đã chốt (AC15).
+  7. `test_tenant_isolation_cannot_assign_or_access_cross_workspace`: Chặn gán thành viên workspace khác; chặn người ngoài và Chủ workspace khác truy cập (HTTP 404).
+  8. `test_optimistic_concurrency_control_on_package_and_items`: Xung đột phiên bản đồng thời trả về HTTP 409 ConcurrencyConflictError (AC10).
+  9. `test_permission_matrix_and_member_role_checks`: Ma trận phân quyền: Thành viên bị chặn tạo gói/duyệt gói (403 - AC03); Điều phối được thêm bài ở DRAFT nhưng bị chặn sửa khi ACTIVE (403); Thành viên INACTIVE nhận 404.
+  10. `test_form_validation_and_input_retention`: Form trả về 400 khi thiếu trường và giữ nguyên dữ liệu đã nhập.
+
+

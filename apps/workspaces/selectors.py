@@ -176,3 +176,88 @@ def get_brand_profile(workspace: Workspace) -> BrandProfile | None:
         return None
     return BrandProfile.objects.filter(workspace=workspace).select_related("updated_by").first()
 
+from .models import ContentItem, Package, Task
+
+
+def get_workspace_packages(workspace: Workspace) -> QuerySet[Package]:
+    """
+    Lấy danh sách các Gói nội dung thuộc workspace.
+    """
+    return (
+        Package.objects.filter(workspace=workspace)
+        .select_related("coordinator_membership", "coordinator_membership__user")
+        .order_by("-created_at")
+    )
+
+
+def get_package_for_workspace(workspace: Workspace, package_id: uuid.UUID | str) -> Package:
+    """
+    Lấy chi tiết Gói nội dung theo ID trong một workspace cụ thể.
+    Trả về 404 nếu không tìm thấy hoặc thuộc workspace khác (cách ly tenant).
+    """
+    try:
+        if isinstance(package_id, str):
+            package_id = uuid.UUID(package_id)
+    except (ValueError, AttributeError):
+        raise Http404("Gói nội dung không tồn tại.")
+
+    package = (
+        Package.objects.filter(id=package_id, workspace=workspace)
+        .select_related("workspace", "coordinator_membership", "coordinator_membership__user")
+        .first()
+    )
+    if not package:
+        raise Http404("Gói nội dung không tồn tại trong workspace này.")
+    return package
+
+
+def get_package_items(package: Package) -> QuerySet[ContentItem]:
+    """
+    Lấy danh sách các bài viết trong một Gói nội dung.
+    """
+    return (
+        ContentItem.objects.filter(package=package)
+        .select_related(
+            "writer_membership__user",
+            "editor_membership__user",
+            "publisher_membership__user",
+        )
+        .order_by("order", "created_at")
+    )
+
+
+def get_item_for_workspace(workspace: Workspace, item_id: uuid.UUID | str) -> ContentItem:
+    """
+    Lấy bài viết theo ID trong workspace. Trả về 404 nếu không thuộc workspace.
+    """
+    try:
+        if isinstance(item_id, str):
+            item_id = uuid.UUID(item_id)
+    except (ValueError, AttributeError):
+        raise Http404("Bài viết không tồn tại.")
+
+    item = (
+        ContentItem.objects.filter(id=item_id, workspace=workspace)
+        .select_related(
+            "package",
+            "writer_membership__user",
+            "editor_membership__user",
+            "publisher_membership__user",
+        )
+        .first()
+    )
+    if not item:
+        raise Http404("Bài viết không tồn tại trong workspace này.")
+    return item
+
+
+def get_item_tasks(item: ContentItem) -> QuerySet[Task]:
+    """
+    Lấy danh sách các nhiệm vụ của một bài viết.
+    """
+    return (
+        Task.objects.filter(item=item)
+        .select_related("assignee_membership__user")
+        .order_by("role")
+    )
+

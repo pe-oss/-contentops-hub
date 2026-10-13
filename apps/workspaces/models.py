@@ -439,4 +439,472 @@ class BrandProfile(models.Model):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
+class PackageStatus(models.TextChoices):
+    DRAFT = "DRAFT", "Kế hoạch nháp"
+    ACTIVE = "ACTIVE", "Đang thực hiện"
+    COMPLETED = "COMPLETED", "Đã hoàn thành"
+    CANCELLED = "CANCELLED", "Đã hủy"
+
+
+class ContentItemState(models.TextChoices):
+    TODO = "TODO", "Chờ thực hiện"
+    WRITING = "WRITING", "Đang viết"
+    EDITING = "EDITING", "Đang biên tập"
+    OWNER_REVIEW = "OWNER_REVIEW", "Chủ duyệt"
+    READY_TO_PUBLISH = "READY_TO_PUBLISH", "Chờ đăng"
+    PUBLISHED = "PUBLISHED", "Đã đăng"
+    CANCELLED = "CANCELLED", "Đã hủy"
+
+
+class TaskRole(models.TextChoices):
+    WRITE = "WRITE", "Viết bài"
+    EDIT = "EDIT", "Biên tập"
+    PUBLISH = "PUBLISH", "Xuất bản"
+
+
+class TaskStatus(models.TextChoices):
+    WAITING = "WAITING", "Chờ bước trước"
+    READY = "READY", "Sẵn sàng"
+    IN_PROGRESS = "IN_PROGRESS", "Đang làm"
+    DONE = "DONE", "Hoàn thành"
+    CANCELLED = "CANCELLED", "Đã hủy"
+
+
+class TaskExecutionMode(models.TextChoices):
+    MANUAL = "MANUAL", "Thủ công"
+    EXTERNAL_AI = "EXTERNAL_AI", "AI bên ngoài"
+    BYOK = "BYOK", "BYOK AI"
+
+
+class Package(models.Model):
+    """
+    Gói nội dung (Package) - Spec mục 4, 5 F02, 9, 13 B04:
+    - Ranh giới quản lý đợt content marketing trong Workspace.
+    - Chứa thông tin mục tiêu, kênh (mặc định FACEBOOK), thời gian và người điều phối.
+    - Snapshot thương hiệu được lưu vào gói khi Chủ duyệt kế hoạch.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="packages",
+        verbose_name="Workspace",
+    )
+    coordinator_membership = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="coordinated_packages",
+        verbose_name="Thành viên điều phối",
+    )
+    name = models.CharField(
+        max_length=150,
+        verbose_name="Tên gói nội dung",
+    )
+    objective = models.TextField(
+        max_length=3000,
+        verbose_name="Mục tiêu của gói",
+    )
+    channel = models.CharField(
+        max_length=50,
+        default="FACEBOOK",
+        verbose_name="Kênh xuất bản",
+    )
+    start_date = models.DateField(
+        verbose_name="Ngày bắt đầu",
+    )
+    end_date = models.DateField(
+        verbose_name="Ngày kết thúc",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=PackageStatus.choices,
+        default=PackageStatus.DRAFT,
+        verbose_name="Trạng thái gói",
+    )
+    plan_revision = models.PositiveIntegerField(
+        default=1,
+        verbose_name="Phiên bản kế hoạch (Plan Revision)",
+    )
+    brand_snapshot = models.JSONField(
+        null=True,
+        blank=True,
+        default=dict,
+        verbose_name="Snapshot hồ sơ thương hiệu",
+    )
+    archived_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Thời điểm lưu trữ",
+    )
+    row_version = models.PositiveIntegerField(
+        default=1,
+        verbose_name="Phiên bản dòng (Row Version)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Thời điểm tạo")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Thời điểm cập nhật")
+
+    class Meta:
+        verbose_name = "Gói nội dung"
+        verbose_name_plural = "Gói nội dung"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status"], name="idx_package_ws_status"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} [{self.get_status_display()}] @ {self.workspace.name}"
+
+    def clean(self) -> None:
+        super().clean()
+        self.name = (self.name or "").strip()
+        if not self.name:
+            raise ValidationError({"name": "Tên gói nội dung không được để trống."})
+        if len(self.name) > 150:
+            raise ValidationError({"name": "Tên gói nội dung không được vượt quá 150 ký tự."})
+
+        self.objective = (self.objective or "").strip()
+        if not self.objective:
+            raise ValidationError({"objective": "Mục tiêu của gói không được để trống."})
+        if len(self.objective) > 3000:
+            raise ValidationError({"objective": "Mục tiêu của gói không được vượt quá 3.000 ký tự."})
+
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValidationError({"end_date": "Ngày kết thúc không được trước ngày bắt đầu."})
+
+        if self.coordinator_membership_id and self.workspace_id:
+            if self.coordinator_membership.workspace_id != self.workspace_id:
+                raise ValidationError({"coordinator_membership": "Thành viên điều phối phải thuộc cùng workspace với gói."})
+            if not self.coordinator_membership.is_active:
+                raise ValidationError({"coordinator_membership": "Thành viên điều phối phải đang hoạt động (ACTIVE)."})
+
+    @property
+    def is_draft(self) -> bool:
+        return self.status == PackageStatus.DRAFT
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == PackageStatus.ACTIVE
+
+class PlanApproval(models.Model):
+    """
+    Bản ghi phê duyệt kế hoạch (Spec mục 4, 9, 13 B04):
+    - Chụp lại toàn bộ snapshot bất biến của kế hoạch và brand tại thời điểm Chủ duyệt.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    package = models.ForeignKey(
+        Package,
+        on_delete=models.CASCADE,
+        related_name="plan_approvals",
+        verbose_name="Gói nội dung",
+    )
+    plan_revision = models.PositiveIntegerField(
+        verbose_name="Phiên bản kế hoạch được duyệt",
+    )
+    immutable_plan_snapshot = models.JSONField(
+        verbose_name="Snapshot kế hoạch bất biến",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="approved_plans",
+        verbose_name="Chủ workspace duyệt",
+    )
+    idempotency_key = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name="Khóa Idempotency chống nhấp đôi",
+    )
+    approved_at = models.DateTimeField(auto_now_add=True, verbose_name="Thời điểm duyệt")
+
+    class Meta:
+        verbose_name = "Bản ghi duyệt kế hoạch"
+        verbose_name_plural = "Bản ghi duyệt kế hoạch"
+        ordering = ["-approved_at"]
+
+    def __str__(self) -> str:
+        return f"Duyệt plan rev {self.plan_revision} - {self.package.name} @ {self.approved_at}"
+
+
+class ContentItem(models.Model):
+    """
+    Bài viết trong kế hoạch nội dung (ContentItem) - Spec mục 4, 5, 9, 13:
+    - Thuộc một Gói nội dung và Workspace.
+    - Chứa brief, CTA, các mốc hạn (viết <= biên tập <= duyệt <= đăng) và 3 vai trò phân công.
+    - Tối đa 50 bài/gói.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="content_items",
+        verbose_name="Workspace",
+    )
+    package = models.ForeignKey(
+        Package,
+        on_delete=models.CASCADE,
+        related_name="items",
+        verbose_name="Gói nội dung",
+    )
+    title = models.CharField(
+        max_length=200,
+        verbose_name="Tiêu đề bài viết",
+    )
+    brief = models.TextField(
+        max_length=5000,
+        verbose_name="Yêu cầu / Brief nội dung",
+    )
+    cta = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="Kêu gọi hành động (CTA)",
+    )
+    state = models.CharField(
+        max_length=20,
+        choices=ContentItemState.choices,
+        default=ContentItemState.TODO,
+        verbose_name="Trạng thái bài viết",
+    )
+    writing_deadline = models.DateTimeField(
+        verbose_name="Hạn viết bài",
+    )
+    editing_deadline = models.DateTimeField(
+        verbose_name="Hạn biên tập",
+    )
+    review_deadline = models.DateTimeField(
+        verbose_name="Hạn Chủ duyệt",
+    )
+    planned_publish_at = models.DateTimeField(
+        verbose_name="Thời điểm dự kiến đăng",
+    )
+    writer_membership = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="assigned_writing_items",
+        verbose_name="Người viết bài",
+    )
+    editor_membership = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="assigned_editing_items",
+        verbose_name="Người biên tập",
+    )
+    publisher_membership = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="assigned_publishing_items",
+        verbose_name="Người xuất bản",
+    )
+    blocked_reason = models.TextField(
+        max_length=2000,
+        blank=True,
+        default="",
+        verbose_name="Lý do bị chặn",
+    )
+    blocked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="blocked_content_items",
+        verbose_name="Người báo bị chặn",
+    )
+    blocked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Thời điểm bị chặn",
+    )
+    resolution_note = models.TextField(
+        max_length=2000,
+        blank=True,
+        default="",
+        verbose_name="Ghi chú giải quyết chặn",
+    )
+    latest_version_id = models.UUIDField(
+        null=True,
+        blank=True,
+        verbose_name="Mã phiên bản mới nhất (B05)",
+    )
+    approval_id = models.UUIDField(
+        null=True,
+        blank=True,
+        verbose_name="Mã phê duyệt hợp lệ (B06)",
+    )
+    row_version = models.PositiveIntegerField(
+        default=1,
+        verbose_name="Phiên bản dòng (Row Version)",
+    )
+    order = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Thứ tự hiển thị",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Thời điểm tạo")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Thời điểm cập nhật")
+
+    class Meta:
+        verbose_name = "Bài viết trong kế hoạch"
+        verbose_name_plural = "Bài viết trong kế hoạch"
+        ordering = ["order", "created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "package", "state"], name="idx_item_ws_pkg_state"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.title} [{self.get_state_display()}] ({self.package.name})"
+
+    def clean(self) -> None:
+        super().clean()
+        self.title = (self.title or "").strip()
+        if not self.title:
+            raise ValidationError({"title": "Tiêu đề bài viết không được để trống."})
+        if len(self.title) > 200:
+            raise ValidationError({"title": "Tiêu đề bài viết không được vượt quá 200 ký tự."})
+
+        self.brief = (self.brief or "").strip()
+        if not self.brief:
+            raise ValidationError({"brief": "Brief bài viết không được để trống."})
+        if len(self.brief) > 5000:
+            raise ValidationError({"brief": "Brief bài viết không được vượt quá 5.000 ký tự."})
+
+        if self.cta:
+            self.cta = self.cta.strip()
+            if len(self.cta) > 500:
+                raise ValidationError({"cta": "Kêu gọi hành động (CTA) không được vượt quá 500 ký tự."})
+
+        # Kiểm tra tính nhất quán workspace giữa package và content item
+        if self.package_id and self.workspace_id:
+            if self.package.workspace_id != self.workspace_id:
+                raise ValidationError({"package": "Gói nội dung không thuộc cùng workspace với bài viết."})
+
+        # Kiểm tra tính nhất quán workspace cho 3 vai trò
+        for field_name, member in [
+            ("writer_membership", getattr(self, "writer_membership", None)),
+            ("editor_membership", getattr(self, "editor_membership", None)),
+            ("publisher_membership", getattr(self, "publisher_membership", None)),
+        ]:
+            if member and self.workspace_id:
+                if member.workspace_id != self.workspace_id:
+                    raise ValidationError({field_name: "Thành viên được phân công phải thuộc cùng workspace."})
+                if not member.is_active:
+                    raise ValidationError({field_name: "Thành viên được phân công phải đang hoạt động (ACTIVE)."})
+
+        # Kiểm tra trật tự deadline theo Spec mục 4: viết <= biên tập <= duyệt <= đăng
+        if self.writing_deadline and self.editing_deadline and self.writing_deadline > self.editing_deadline:
+            raise ValidationError({"editing_deadline": "Hạn biên tập không được trước hạn viết."})
+
+        if self.editing_deadline and self.review_deadline and self.editing_deadline > self.review_deadline:
+            raise ValidationError({"review_deadline": "Hạn duyệt không được trước hạn biên tập."})
+
+        if self.review_deadline and self.planned_publish_at and self.review_deadline > self.planned_publish_at:
+            raise ValidationError({"planned_publish_at": "Thời điểm dự kiến đăng không được trước hạn duyệt."})
+
+        # Kiểm tra lịch bài nằm trong khoảng thời gian của gói
+        if self.package_id:
+            pkg = self.package
+            if pkg.start_date and self.writing_deadline and self.writing_deadline.date() < pkg.start_date:
+                raise ValidationError({"writing_deadline": f"Hạn viết ({self.writing_deadline.date()}) không được trước ngày bắt đầu gói ({pkg.start_date})."})
+            if pkg.end_date and self.planned_publish_at and self.planned_publish_at.date() > pkg.end_date:
+                raise ValidationError({"planned_publish_at": f"Thời điểm dự kiến đăng ({self.planned_publish_at.date()}) không được sau ngày kết thúc gói ({pkg.end_date})."})
+
+
+class Task(models.Model):
+    """
+    Nhiệm vụ tác nghiệp (Task) - Spec mục 6.2, 9, 13:
+    - 3 nhiệm vụ trên mỗi bài: WRITE, EDIT, PUBLISH.
+    - Sinh tự động khi Chủ duyệt kế hoạch (F02).
+    - Ràng buộc: unique(item, role).
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+        verbose_name="Workspace",
+    )
+    item = models.ForeignKey(
+        ContentItem,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+        verbose_name="Bài viết",
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=TaskRole.choices,
+        verbose_name="Vai trò nhiệm vụ",
+    )
+    assignee_membership = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="tasks",
+        verbose_name="Thành viên chịu trách nhiệm",
+    )
+    execution_mode = models.CharField(
+        max_length=20,
+        choices=TaskExecutionMode.choices,
+        default=TaskExecutionMode.MANUAL,
+        verbose_name="Hình thức thực hiện",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=TaskStatus.choices,
+        default=TaskStatus.WAITING,
+        verbose_name="Trạng thái nhiệm vụ",
+    )
+    due_at = models.DateTimeField(
+        verbose_name="Thời hạn nhiệm vụ",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Thời điểm tạo")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Thời điểm cập nhật")
+
+    class Meta:
+        verbose_name = "Nhiệm vụ"
+        verbose_name_plural = "Nhiệm vụ"
+        ordering = ["due_at", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "role"],
+                name="unique_item_task_role",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["workspace", "assignee_membership", "status"], name="idx_task_ws_assignee_st"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_role_display()} - {self.item.title} [{self.get_status_display()}]"
+
+    def clean(self) -> None:
+        super().clean()
+        if self.item_id and self.workspace_id and self.item.workspace_id != self.workspace_id:
+            raise ValidationError({"item": "Bài viết không thuộc cùng workspace với nhiệm vụ."})
+        if self.assignee_membership_id and self.workspace_id:
+            if self.assignee_membership.workspace_id != self.workspace_id:
+                raise ValidationError({"assignee_membership": "Thành viên được giao việc phải thuộc cùng workspace."})
+
+
 

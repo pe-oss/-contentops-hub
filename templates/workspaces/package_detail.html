@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}{{ package.name }} — Kế hoạch Gói nội dung{% endblock %}
+
+{% block content %}
+<section class="dashboard-page">
+  <div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+        <p class="eyebrow" style="margin: 0;"><a href="{% url 'workspaces:package_list' workspace.id %}">← Tất cả Gói</a></p>
+        <span class="badge" style="font-size: 11px;">{{ package.get_status_display }}</span>
+      </div>
+      <h1 style="margin: 0 0 8px 0;">📦 {{ package.name }}</h1>
+      <p class="muted" style="margin: 0;">
+        Kênh: <strong>{{ package.channel }}</strong> &bull;
+        Thời gian: <strong>{{ package.start_date|date:"d/m/Y" }} – {{ package.end_date|date:"d/m/Y" }}</strong> &bull;
+        Điều phối: <strong>{{ package.coordinator_membership.user.get_full_name|default:package.coordinator_membership.user.username }}</strong>
+      </p>
+    </div>
+
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      {% if is_owner %}
+        <a href="{% url 'workspaces:package_edit' workspace.id package.id %}" class="btn">Sửa gói</a>
+      {% endif %}
+      {% if can_edit_items %}
+        <a href="{% url 'workspaces:item_create' workspace.id package.id %}" class="btn btn-primary">+ Thêm bài</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if package.is_draft and is_owner %}
+    <div class="card" style="margin-top: 20px; border-left: 4px solid #1a73e8; background: #f8fafd;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+        <div>
+          <h4 style="margin: 0 0 4px 0; color: #1a73e8;">Phê duyệt Kế hoạch &amp; Khởi tạo Nhiệm vụ (F02)</h4>
+          <p class="muted" style="margin: 0; font-size: 13px;">
+            Lưu snapshot bất biến kế hoạch và thương hiệu, đồng thời sinh 3 nhiệm vụ (Viết, Biên tập, Xuất bản) cho từng bài.
+          </p>
+        </div>
+        <form method="post" action="{% url 'workspaces:package_approve_plan' workspace.id package.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="idempotency_key" value="{{ package.id }}_rev{{ package.plan_revision }}">
+          <button type="submit" class="btn btn-primary" onclick="return confirm('Duyệt kế hoạch này?');">
+            Duyệt Kế hoạch ngay ✓
+          </button>
+        </form>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="card" style="margin-top: 20px;">
+    <h4 style="margin-top: 0; margin-bottom: 8px;">Mục tiêu chiến dịch</h4>
+    <p style="margin: 0; line-height: 1.6; white-space: pre-wrap; font-size: 14px;">{{ package.objective }}</p>
+  </div>
+
+  <div style="margin-top: 28px;">
+    <h3 style="margin: 0 0 12px 0;">Danh sách bài viết trong kế hoạch ({{ items.count }}/50)</h3>
+
+    {% if items %}
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        {% for item in items %}
+          <div class="card" style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h4 style="margin: 0 0 4px 0;">#{{ forloop.counter }}. {{ item.title }}</h4>
+                <p class="muted" style="margin: 0; font-size: 13px;">CTA: <em>{{ item.cta|default:"Không có" }}</em></p>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span class="badge" style="font-size: 11px;">{{ item.get_state_display }}</span>
+                {% if can_edit_items %}
+                  <a href="{% url 'workspaces:item_edit' workspace.id package.id item.id %}" class="btn" style="font-size: 12px; padding: 4px 8px;">Sửa bài</a>
+                {% endif %}
+              </div>
+            </div>
+
+            <p style="font-size: 14px; line-height: 1.5; color: #444; margin: 0; background: #fdfdfd; padding: 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <strong>Brief:</strong> {{ item.brief }}
+            </p>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; font-size: 13px; background: #fafafa; padding: 8px; border-radius: 4px;">
+              <div>
+                <strong>✍️ Viết:</strong> {{ item.writer_membership.user.get_full_name|default:item.writer_membership.user.username }}<br>
+                <small class="muted">Hạn: {{ item.writing_deadline|date:"H:i d/m/Y" }}</small>
+              </div>
+              <div>
+                <strong>🔍 Biên tập:</strong> {{ item.editor_membership.user.get_full_name|default:item.editor_membership.user.username }}<br>
+                <small class="muted">Hạn: {{ item.editing_deadline|date:"H:i d/m/Y" }}</small>
+              </div>
+              <div>
+                <strong>📢 Xuất bản:</strong> {{ item.publisher_membership.user.get_full_name|default:item.publisher_membership.user.username }}<br>
+                <small class="muted">Đăng: {{ item.planned_publish_at|date:"H:i d/m/Y" }}</small>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="card" style="text-align: center; padding: 40px 20px;">
+        <p class="muted" style="margin-bottom: 16px;">Gói này chưa có bài viết nào trong kế hoạch.</p>
+        {% if can_edit_items %}
+          <a href="{% url 'workspaces:item_create' workspace.id package.id %}" class="btn btn-primary">+ Thêm bài viết đầu tiên</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

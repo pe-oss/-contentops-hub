@@ -111,4 +111,46 @@ class BrandProfileAdmin(admin.ModelAdmin):
     list_filter = ("revision", "updated_at")
     search_fields = ("name", "workspace__name", "product_summary")
     readonly_fields = ("id", "revision", "created_at", "updated_at")
+from .models import ContentItem, Package, PlanApproval, Task
+
+
+class ContentItemInline(admin.TabularInline):
+    model = ContentItem
+    extra = 0
+    readonly_fields = ("id", "state", "row_version", "created_at")
+    fields = ("title", "state", "writer_membership", "editor_membership", "publisher_membership", "writing_deadline", "planned_publish_at")
+
+
+@admin.register(Package)
+class PackageAdmin(admin.ModelAdmin):
+    list_display = ("name", "workspace", "status", "coordinator_membership", "plan_revision", "row_version", "start_date", "end_date", "created_at")
+    list_filter = ("status", "channel", "created_at")
+    search_fields = ("name", "workspace__name", "objective")
+    readonly_fields = ("id", "plan_revision", "row_version", "brand_snapshot", "created_at", "updated_at")
+    inlines = [ContentItemInline]
+
+
+@admin.register(ContentItem)
+class ContentItemAdmin(admin.ModelAdmin):
+    list_display = ("title", "package", "workspace", "state", "writer_membership", "editor_membership", "publisher_membership", "row_version")
+    list_filter = ("state", "created_at")
+    search_fields = ("title", "brief", "package__name", "workspace__name")
+    readonly_fields = ("id", "row_version", "created_at", "updated_at")
+
+
+@admin.register(PlanApproval)
+class PlanApprovalAdmin(admin.ModelAdmin):
+    list_display = ("package", "plan_revision", "owner", "approved_at", "idempotency_key")
+    list_filter = ("plan_revision", "approved_at")
+    search_fields = ("package__name", "owner__username")
+    readonly_fields = ("id", "plan_revision", "immutable_plan_snapshot", "approved_at")
+
+
+@admin.register(Task)
+class TaskAdmin(admin.ModelAdmin):
+    list_display = ("item", "role", "assignee_membership", "status", "due_at")
+    list_filter = ("role", "status", "due_at")
+    search_fields = ("item__title", "assignee_membership__user__username")
+    readonly_fields = ("id", "created_at", "updated_at")
+
 

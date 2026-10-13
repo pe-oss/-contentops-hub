@@ -2,10 +2,17 @@ from django.urls import path
 
 from .views import (
     BrandProfileView,
+    ContentItemCreateView,
+    ContentItemUpdateView,
     InvitationAcceptView,
     MemberDeactivateView,
     MemberEditView,
     MemberReactivateView,
+    PackageApprovePlanView,
+    PackageCreateView,
+    PackageDetailView,
+    PackageListView,
+    PackageUpdateView,
     WorkspaceCreateView,
     WorkspaceDetailView,
     WorkspaceInvitationResendView,
@@ -27,6 +34,28 @@ urlpatterns = [
     path("<uuid:workspace_id>/switch/", WorkspaceSwitchView.as_view(), name="switch"),
     path("<uuid:workspace_id>/brand/", BrandProfileView.as_view(), name="brand_profile"),
 
+    # Packages & Planning (B04)
+    path("<uuid:workspace_id>/packages/", PackageListView.as_view(), name="package_list"),
+    path("<uuid:workspace_id>/packages/new/", PackageCreateView.as_view(), name="package_create"),
+    path("<uuid:workspace_id>/packages/<uuid:package_id>/", PackageDetailView.as_view(), name="package_detail"),
+    path("<uuid:workspace_id>/packages/<uuid:package_id>/edit/", PackageUpdateView.as_view(), name="package_edit"),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/approve-plan/",
+        PackageApprovePlanView.as_view(),
+        name="package_approve_plan",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/new/",
+        ContentItemCreateView.as_view(),
+        name="item_create",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/edit/",
+        ContentItemUpdateView.as_view(),
+        name="item_edit",
+    ),
+
+    # Members & Invitations (B02)
     path("<uuid:workspace_id>/members/", WorkspaceMembersView.as_view(), name="members"),
     path("<uuid:workspace_id>/members/<uuid:membership_id>/edit/", MemberEditView.as_view(), name="member_edit"),
     path(
@@ -52,3 +81,4 @@ urlpatterns = [
     ),
     path("invitations/accept/<str:token>/", InvitationAcceptView.as_view(), name="invitation_accept"),
 ]
+

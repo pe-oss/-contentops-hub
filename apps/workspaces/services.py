@@ -668,3 +668,409 @@ def save_brand_profile(
             )
         return brand_profile
 
+from .models import (
+    ContentItem,
+    ContentItemState,
+    Package,
+    PackageStatus,
+    PlanApproval,
+    Task,
+    TaskRole,
+    TaskStatus,
+)
+
+
+@transaction.atomic
+def create_package(
+    *,
+    user: Any,
+    workspace: Workspace,
+    name: str,
+    objective: str,
+    coordinator_membership: Membership,
+    start_date: Any,
+    end_date: Any,
+    channel: str = "FACEBOOK",
+) -> Package:
+    """
+    Tạo gói nội dung (Spec F02, B04):
+    - Chủ workspace có quyền tạo gói và chỉ định người điều phối.
+    - Người điều phối phải thuộc cùng workspace và đang hoạt động (ACTIVE).
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+
+    user_membership = get_active_membership(user, workspace)
+    if not user_membership or not user_membership.is_active or user_membership.access_role != AccessRole.OWNER:
+        raise PermissionDenied("Chỉ Chủ workspace mới có quyền tạo Gói nội dung.")
+
+    if coordinator_membership.workspace_id != workspace.id:
+        raise ValidationError({"coordinator_membership": "Thành viên điều phối phải thuộc cùng workspace."})
+    if not coordinator_membership.is_active:
+        raise ValidationError({"coordinator_membership": "Thành viên điều phối phải đang hoạt động (ACTIVE)."})
+
+    package = Package(
+        workspace=workspace,
+        name=name,
+        objective=objective,
+        coordinator_membership=coordinator_membership,
+        start_date=start_date,
+        end_date=end_date,
+        channel=channel or "FACEBOOK",
+        status=PackageStatus.DRAFT,
+        plan_revision=1,
+        row_version=1,
+    )
+    package.full_clean()
+    package.save()
+    return package
+
+
+@transaction.atomic
+def update_package(
+    *,
+    user: Any,
+    package: Package,
+    name: str,
+    objective: str,
+    coordinator_membership: Membership,
+    start_date: Any,
+    end_date: Any,
+    expected_row_version: int | None = None,
+) -> Package:
+    """
+    Chỉnh sửa thông tin gói nội dung.
+    - Sau khi duyệt (ACTIVE): Chỉ Chủ mới sửa được phạm vi/lịch và tăng plan_revision (Spec F02).
+    - Hỗ trợ Optimistic Concurrency Control qua row_version.
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+
+    user_membership = get_active_membership(user, package.workspace)
+    if not user_membership or not user_membership.is_active or user_membership.access_role != AccessRole.OWNER:
+        raise PermissionDenied("Chỉ Chủ workspace mới có quyền sửa thông tin Gói nội dung.")
+
+    # Khóa dòng package
+    locked_pkg = Package.objects.select_for_update().filter(id=package.id).first()
+    if not locked_pkg:
+        raise ValidationError("Gói nội dung không tồn tại.")
+
+    if expected_row_version is not None and locked_pkg.row_version != expected_row_version:
+        raise ConcurrencyConflictError(
+            f"Gói nội dung đã bị thay đổi ở một phiên khác (phiên bản hiện tại: {locked_pkg.row_version}, của bạn: {expected_row_version})."
+        )
+
+    if coordinator_membership.workspace_id != locked_pkg.workspace_id:
+        raise ValidationError({"coordinator_membership": "Thành viên điều phối phải thuộc cùng workspace."})
+    if not coordinator_membership.is_active:
+        raise ValidationError({"coordinator_membership": "Thành viên điều phối phải đang hoạt động (ACTIVE)."})
+
+    locked_pkg.name = name
+    locked_pkg.objective = objective
+    locked_pkg.coordinator_membership = coordinator_membership
+    locked_pkg.start_date = start_date
+    locked_pkg.end_date = end_date
+    locked_pkg.row_version += 1
+    if locked_pkg.status == PackageStatus.ACTIVE:
+        locked_pkg.plan_revision += 1
+
+    locked_pkg.full_clean()
+    locked_pkg.save()
+    return locked_pkg
+@transaction.atomic
+def add_content_item(
+    *,
+    user: Any,
+    package: Package,
+    title: str,
+    brief: str,
+    cta: str,
+    writing_deadline: Any,
+    editing_deadline: Any,
+    review_deadline: Any,
+    planned_publish_at: Any,
+    writer_membership: Membership,
+    editor_membership: Membership,
+    publisher_membership: Membership,
+) -> ContentItem:
+    """
+    Thêm bài viết vào kế hoạch (Spec F02, B04):
+    - Chủ hoặc Người điều phối gói có quyền thêm bài.
+    - Giới hạn: tối đa 50 bài / gói (Spec mục 4).
+    - 3 vai trò phân công phải thuộc cùng workspace và đang hoạt động (ACTIVE).
+    - Trật tự deadline: viết <= biên tập <= duyệt <= đăng.
+    - Lịch bài phải nằm trong khoảng thời gian của gói.
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+
+    user_membership = get_active_membership(user, package.workspace)
+    if not user_membership or not user_membership.is_active:
+        raise PermissionDenied("Bạn không có quyền trong workspace này.")
+
+    # Phân quyền: Chủ workspace hoặc người điều phối gói (Spec F02)
+    is_owner = user_membership.access_role == AccessRole.OWNER
+    is_coordinator = package.coordinator_membership_id == user_membership.id
+    if not is_owner and not is_coordinator:
+        raise PermissionDenied("Chỉ Chủ workspace hoặc Người điều phối mới có quyền thêm bài vào kế hoạch.")
+
+    # Khóa package
+    locked_pkg = Package.objects.select_for_update().filter(id=package.id).first()
+    if not locked_pkg:
+        raise ValidationError("Gói nội dung không tồn tại.")
+
+    current_item_count = ContentItem.objects.filter(package=locked_pkg).count()
+    if current_item_count >= 50:
+        raise ValidationError({"title": "Một gói nội dung tối đa 50 bài viết theo Spec R1."})
+
+    # Kiểm tra phân công cùng workspace & ACTIVE
+    for role_name, member in [
+        ("writer_membership", writer_membership),
+        ("editor_membership", editor_membership),
+        ("publisher_membership", publisher_membership),
+    ]:
+        if member.workspace_id != locked_pkg.workspace_id:
+            raise ValidationError({role_name: "Thành viên được phân công phải thuộc cùng workspace."})
+        if not member.is_active:
+            raise ValidationError({role_name: "Thành viên được phân công phải đang hoạt động (ACTIVE)."})
+
+    item = ContentItem(
+        workspace=locked_pkg.workspace,
+        package=locked_pkg,
+        title=title,
+        brief=brief,
+        cta=cta or "",
+        writing_deadline=writing_deadline,
+        editing_deadline=editing_deadline,
+        review_deadline=review_deadline,
+        planned_publish_at=planned_publish_at,
+        writer_membership=writer_membership,
+        editor_membership=editor_membership,
+        publisher_membership=publisher_membership,
+        state=ContentItemState.TODO,
+        row_version=1,
+        order=current_item_count + 1,
+    )
+    item.full_clean()
+    item.save()
+    return item
+@transaction.atomic
+def update_content_item(
+    *,
+    user: Any,
+    item: ContentItem,
+    title: str,
+    brief: str,
+    cta: str,
+    writing_deadline: Any,
+    editing_deadline: Any,
+    review_deadline: Any,
+    planned_publish_at: Any,
+    writer_membership: Membership,
+    editor_membership: Membership,
+    publisher_membership: Membership,
+    expected_row_version: int | None = None,
+) -> ContentItem:
+    """
+    Sửa bài viết trong kế hoạch.
+    - Khi kế hoạch đã duyệt: chỉ Chủ mới có quyền sửa (Spec F02).
+    - Hỗ trợ Optimistic Concurrency Control qua row_version.
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+
+    user_membership = get_active_membership(user, item.workspace)
+    if not user_membership or not user_membership.is_active:
+        raise PermissionDenied("Bạn không có quyền trong workspace này.")
+
+    package = item.package
+    is_owner = user_membership.access_role == AccessRole.OWNER
+    is_coordinator = package.coordinator_membership_id == user_membership.id
+
+    if package.status == PackageStatus.ACTIVE:
+        if not is_owner:
+            raise PermissionDenied("Khi kế hoạch đã duyệt, chỉ Chủ workspace mới có quyền sửa bài viết.")
+    else:
+        if not is_owner and not is_coordinator:
+            raise PermissionDenied("Chỉ Chủ workspace hoặc Người điều phối mới có quyền sửa bài viết.")
+
+    locked_item = ContentItem.objects.select_for_update().filter(id=item.id).first()
+    if not locked_item:
+        raise ValidationError("Bài viết không tồn tại.")
+
+    if expected_row_version is not None and locked_item.row_version != expected_row_version:
+        raise ConcurrencyConflictError(
+            f"Bài viết đã bị thay đổi ở một phiên khác (phiên bản hiện tại: {locked_item.row_version}, của bạn: {expected_row_version})."
+        )
+
+    for role_name, member in [
+        ("writer_membership", writer_membership),
+        ("editor_membership", editor_membership),
+        ("publisher_membership", publisher_membership),
+    ]:
+        if member.workspace_id != locked_item.workspace_id:
+            raise ValidationError({role_name: "Thành viên được phân công phải thuộc cùng workspace."})
+        if not member.is_active:
+            raise ValidationError({role_name: "Thành viên được phân công phải đang hoạt động (ACTIVE)."})
+
+    locked_item.title = title
+    locked_item.brief = brief
+    locked_item.cta = cta or ""
+    locked_item.writing_deadline = writing_deadline
+    locked_item.editing_deadline = editing_deadline
+    locked_item.review_deadline = review_deadline
+    locked_item.planned_publish_at = planned_publish_at
+    locked_item.writer_membership = writer_membership
+    locked_item.editor_membership = editor_membership
+    locked_item.publisher_membership = publisher_membership
+    locked_item.row_version += 1
+
+    locked_item.full_clean()
+    locked_item.save()
+
+    if package.status == PackageStatus.ACTIVE:
+        package.plan_revision += 1
+        package.save(update_fields=["plan_revision"])
+
+        Task.objects.filter(item=locked_item, role=TaskRole.WRITE).update(
+            assignee_membership=writer_membership,
+            due_at=writing_deadline,
+        )
+        Task.objects.filter(item=locked_item, role=TaskRole.EDIT).update(
+            assignee_membership=editor_membership,
+            due_at=editing_deadline,
+        )
+        Task.objects.filter(item=locked_item, role=TaskRole.PUBLISH).update(
+            assignee_membership=publisher_membership,
+            due_at=planned_publish_at,
+        )
+def _build_plan_snapshot(package: Package, items: list[ContentItem], brand_snap: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "package_id": str(package.id),
+        "package_name": package.name,
+        "objective": package.objective,
+        "channel": package.channel,
+        "start_date": package.start_date.isoformat() if package.start_date else None,
+        "end_date": package.end_date.isoformat() if package.end_date else None,
+        "plan_revision": package.plan_revision,
+        "brand_snapshot": brand_snap,
+        "items": [
+            {
+                "item_id": str(it.id),
+                "title": it.title,
+                "brief": it.brief,
+                "cta": it.cta,
+                "writing_deadline": it.writing_deadline.isoformat() if it.writing_deadline else None,
+                "editing_deadline": it.editing_deadline.isoformat() if it.editing_deadline else None,
+                "review_deadline": it.review_deadline.isoformat() if it.review_deadline else None,
+                "planned_publish_at": it.planned_publish_at.isoformat() if it.planned_publish_at else None,
+                "writer_id": str(it.writer_membership.user_id),
+                "editor_id": str(it.editor_membership.user_id),
+                "publisher_id": str(it.publisher_membership.user_id),
+            }
+            for it in items
+        ],
+    }
+
+
+@transaction.atomic
+def approve_plan(
+    *,
+    user: Any,
+    package: Package,
+    idempotency_key: str = "",
+) -> tuple[Package, PlanApproval, list[Task]]:
+    """
+    Chủ duyệt kế hoạch gói nội dung (Spec F02, AC04, AC05, B04).
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+
+    user_membership = get_active_membership(user, package.workspace)
+    if not user_membership or not user_membership.is_active or user_membership.access_role != AccessRole.OWNER:
+        raise PermissionDenied("Chỉ Chủ workspace mới có quyền phê duyệt kế hoạch.")
+
+    locked_pkg = (
+        Package.objects.select_for_update()
+        .filter(id=package.id)
+        .select_related("workspace", "coordinator_membership")
+        .first()
+    )
+    if not locked_pkg:
+        raise ValidationError("Gói nội dung không tồn tại.")
+
+    clean_idempotency_key = (idempotency_key or "").strip()
+    if clean_idempotency_key:
+        existing_approval = PlanApproval.objects.filter(
+            package=locked_pkg,
+            idempotency_key=clean_idempotency_key,
+        ).first()
+        if existing_approval:
+            existing_tasks = list(Task.objects.filter(item__package=locked_pkg))
+            return locked_pkg, existing_approval, existing_tasks
+
+    if locked_pkg.status != PackageStatus.DRAFT:
+        raise ValidationError(f"Chỉ có thể duyệt kế hoạch khi ở trạng thái nháp (DRAFT). Hiện tại: {locked_pkg.status}.")
+
+    items = list(
+        ContentItem.objects.select_for_update()
+        .filter(package=locked_pkg)
+        .select_related("writer_membership", "editor_membership", "publisher_membership")
+    )
+    if not items:
+        raise ValidationError("Kế hoạch phải có ít nhất 1 bài viết để có thể phê duyệt.")
+
+    for item in items:
+        item.full_clean()
+        for role_name, member in [
+            ("writer_membership", item.writer_membership),
+            ("editor_membership", item.editor_membership),
+            ("publisher_membership", item.publisher_membership),
+        ]:
+            if not member or not member.is_active or member.workspace_id != locked_pkg.workspace_id:
+                raise ValidationError(
+                    f"Bài '{item.title}' có người thực hiện ({role_name}) không hợp lệ hoặc không còn hoạt động."
+                )
+
+    brand_profile = BrandProfile.objects.filter(workspace=locked_pkg.workspace).first()
+    brand_snap = brand_profile.to_snapshot() if brand_profile else {
+        "brand_profile_id": None,
+        "brand_name": locked_pkg.workspace.name,
+        "product_summary": "",
+        "target_audience": "",
+        "revision": 0,
+        "source_urls": [],
+    }
+
+    plan_snapshot = _build_plan_snapshot(locked_pkg, items, brand_snap)
+
+    locked_pkg.brand_snapshot = brand_snap
+    locked_pkg.status = PackageStatus.ACTIVE
+    locked_pkg.row_version += 1
+    locked_pkg.save(update_fields=["brand_snapshot", "status", "row_version", "updated_at"])
+
+    approval = PlanApproval.objects.create(
+        package=locked_pkg,
+        plan_revision=locked_pkg.plan_revision,
+        immutable_plan_snapshot=plan_snapshot,
+        owner=user,
+        idempotency_key=clean_idempotency_key,
+    )
+
+    created_tasks = []
+    for item in items:
+        for role, defaults in [
+            (TaskRole.WRITE, {"workspace": locked_pkg.workspace, "assignee_membership": item.writer_membership, "due_at": item.writing_deadline, "status": TaskStatus.READY}),
+            (TaskRole.EDIT, {"workspace": locked_pkg.workspace, "assignee_membership": item.editor_membership, "due_at": item.editing_deadline, "status": TaskStatus.WAITING}),
+            (TaskRole.PUBLISH, {"workspace": locked_pkg.workspace, "assignee_membership": item.publisher_membership, "due_at": item.planned_publish_at, "status": TaskStatus.WAITING}),
+        ]:
+            t, _ = Task.objects.get_or_create(item=item, role=role, defaults=defaults)
+            created_tasks.append(t)
+
+    return locked_pkg, approval, created_tasks
+
+
+    return locked_item
+
+
+
