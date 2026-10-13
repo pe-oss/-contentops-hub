@@ -18,7 +18,13 @@
           <a class="btn" href="{% url 'pricing' %}">Bảng giá</a>
         {% endif %}
         {% if request.user.is_authenticated %}
-          <span class="muted">Xin chào, {{ request.user.username }}</span>
+          {% if current_workspace %}
+            <a class="btn" href="{% url 'workspaces:detail' current_workspace.id %}" style="display:inline-flex; align-items:center; gap:6px; font-weight: 600;">
+              <span>🏢</span>
+              <span>{{ current_workspace.name }}</span>
+            </a>
+          {% endif %}
+          <a class="btn" href="{% url 'workspaces:list' %}">Workspaces</a>
           <a class="btn btn-primary" href="{% url 'dashboard' %}">Dashboard</a>
           <a class="btn" href="{% url 'accounts:password_change' %}">Đổi mật khẩu</a>
           <form method="post" action="{% url 'accounts:logout' %}">{% csrf_token %}<button class="btn" type="submit">Đăng xuất</button></form>

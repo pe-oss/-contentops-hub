@@ -6,14 +6,14 @@
 
 - **Spec cơ sở:** `docs/Spec-Ban-Content-Marketing-v1.0.md` (Phiên bản v1.0).
 - **Mốc xuất phát:** Nhánh `chore/boilerplate-baseline` (commit `4fd4046`).
-- **Nhánh hiện tại:** `feat/b00-email-identity` (tiếp nối commit `10104d7`).
+- **Nhánh hiện tại:** `feat/b01-workspaces` (tiếp nối nhánh `feat/b00-email-identity`, commit `9c589fb`).
 
 | Giai đoạn / Nhiệm vụ | Trạng thái | Ghi chú |
 |---|---|---|
 | **B00.1 — Chuẩn hóa môi trường & cấu hình** | **HOÀN TẤT** | Python 3.12, Django 5.2.18, `BILLING_ENABLED=False`, STORAGES, fail-fast production |
 | **B00.2 — Chuẩn hóa Email identity & verification** | **HOÀN TẤT** | AccountEmailIdentity unique, chặn login mơ hồ, token verification, rate limit, migration backfill an toàn |
-| **B01 — Kiến trúc Workspace & Phân quyền nghiệp vụ** | CHƯA LÀM | Spec mục 3, 5, 8, 18 |
-| **B02 — Quản lý Chiến dịch & Content Calendar** | CHƯA LÀM | Spec mục 6, 9 |
+| **B01 — Workspace & Cách ly dữ liệu (Tenant Isolation)** | **HOÀN TẤT** | Workspace UUID, membership OWNER nguyên tử, cách ly truy cập 404, kiểm soát quyền sửa 403, chống giả mạo |
+| **B02 — Thành viên, Lời mời & Phân quyền chi tiết** | CHƯA LÀM | Spec mục 3.2, 8, 18 (Dừng trước B02 theo yêu cầu) |
 | **B03 — Pipeline Sinh nội dung & AI Gateway (BYOK)** | CHƯA LÀM | Spec mục 10, 11 |
 | **B04 — Quality Gate & Duyệt bài (Review/Approval)** | CHƯA LÀM | Spec mục 12, 13 |
 | **B05 — Publishing Channel Adapters & Automation** | CHƯA LÀM | Spec mục 14, 15 |
@@ -98,22 +98,84 @@
 
 ---
 
-## 4. Kết quả Kiểm thử & Cách ly Database (Validation)
+## 4. Chi tiết thực hiện B01 (Workspaces & Tenant Data Isolation)
+
+### 4.1. Ứng dụng `apps/workspaces` & Mô hình Dữ liệu Tối thiểu
+- **Tạo ứng dụng:** Khởi tạo `apps/workspaces` (`apps.py`, `models.py`, `selectors.py`, `services.py`, `forms.py`, `views.py`, `urls.py`, `admin.py`, `context_processors.py`). Đã đăng ký vào `INSTALLED_APPS` và gán template context processor `workspace_context`.
+- **Mô hình `Workspace`:**
+  - Khóa chính: `id` kiểu `UUIDField` (`default=uuid.uuid4`, editable=False).
+  - Tên: `name` (1–100 ký tự, strip whitespace, không rỗng, không chỉ khoảng trắng).
+  - Múi giờ: `timezone` (mặc định `Asia/Ho_Chi_Minh`, validate chuẩn danh mục IANA `zoneinfo.available_timezones()`).
+  - Chủ workspace: `owner_user` (`ForeignKey` trỏ `settings.AUTH_USER_MODEL`, `on_delete=models.PROTECT`, `related_name="owned_workspaces"`).
+  - Thời gian: `created_at` (auto_now_add), `updated_at` (auto_now).
+- **Mô hình `Membership`:**
+  - Khóa chính: `id` kiểu `UUIDField` (`default=uuid.uuid4`, editable=False).
+  - Quan hệ: `workspace` (FK CASCADE), `user` (FK CASCADE).
+  - `access_role`: Enum `OWNER` ("Chủ workspace"), `MEMBER` ("Thành viên").
+  - `employment_type`: Enum `IN_HOUSE` ("Nội bộ"), `FREELANCER` ("Freelancer / Đối tác ngoài").
+  - `status`: Enum `ACTIVE` ("Đang hoạt động"), `INACTIVE` ("Vô hiệu hóa"), `INVITED` ("Đang mời").
+  - `ai_use_allowed`: BooleanField (`default=False`, OWNER mặc định True).
+  - Ràng buộc toàn vẹn CSDL: `UniqueConstraint(fields=["workspace", "user"], name="unique_workspace_user")` ngăn chặn hoàn toàn việc tạo trùng lặp membership cho cùng một người dùng trong một workspace.
+- **Migration:** `workspaces.0001_initial` đã khởi tạo và áp dụng thành công trên cơ sở dữ liệu PostgreSQL.
+
+### 4.2. Khởi tạo Workspace & Quyền Chủ (Single Owner Consistency)
+- `create_workspace_with_owner()`:
+  - Bọc `@transaction.atomic`.
+  - Validate tên và timezone.
+  - Tạo `Workspace` và gắn `owner_user = user`.
+  - Tạo `Membership` gắn vai trò `access_role=OWNER`, `status=ACTIVE`, `ai_use_allowed=True` trong cùng transaction.
+  - Nếu xảy ra lỗi bất kỳ, toàn bộ transaction bị rollback, không để lại bản ghi rác hoặc dở dang.
+  - `owner_user` là nguồn duy nhất xác định Chủ; membership OWNER luôn nhất quán với trường này.
+  - Không lấy `owner_user` hay `access_role` từ dữ liệu form client để cấp quyền (chống parameter tampering / privilege escalation).
+  - Không cấp cờ `is_staff` hay `is_superuser` của Django cho Chủ workspace.
+- **Quản trị Django Admin (`apps/workspaces/admin.py`):**
+  - Đồng bộ nhất quán `WorkspaceAdmin.save_model` và `MembershipAdmin.save_model`.
+  - Ngăn cấm hạ quyền OWNER của người đang là `owner_user` của workspace.
+  - Từ chối tạo hai Chủ trong cùng một workspace qua Admin.
+
+### 4.3. Phân quyền & Cách ly Dữ liệu (Backend Enforcing)
+- **Tầng Selectors (`apps/workspaces/selectors.py`):**
+  - `get_user_workspaces(user)`: Lọc nghiêm ngặt các workspace mà người dùng có membership trạng thái `ACTIVE`.
+  - `get_workspace_for_user(user, workspace_id)`:
+    - Nếu workspace không tồn tại HOẶC người dùng không có membership `ACTIVE`: **trả về HTTP 404** (Spec 3.1: "Với đối tượng ngoài phạm vi đọc trả 404", ngăn chặn kẻ tấn công dò quét ID workspace bằng URL injection).
+- **Tầng Services (`apps/workspaces/services.py`):**
+  - `update_workspace_info()`: Kiểm tra quyền Chủ. Nếu người dùng chỉ là `MEMBER` hoặc membership không active, lập tức ném `PermissionDenied` (HTTP 403: "Với đối tượng được đọc nhưng không được sửa trả 403").
+  - `switch_active_workspace()`: Kiểm tra quyền thành viên trước khi ghi nhận `active_workspace_id` vào session; nếu không phải thành viên ném 404.
+  - `get_current_active_workspace()`: Tái xác thực membership thực tế trong DB trên mỗi request. Nếu session chứa ID mà user đã bị thu hồi/vô hiệu hóa quyền (`status=INACTIVE`), session key lập tức bị xóa bỏ và hệ thống tự động fallback an toàn về workspace hợp lệ khác hoặc `None`. Tuyệt đối không coi session là bằng chứng phân quyền.
+
+### 4.4. Giao diện Người dùng (Templates & HTMX)
+- `templates/workspaces/workspace_list.html`: Danh sách các workspace người dùng đang tham gia; nếu chưa có workspace nào sẽ hiển thị giao diện hướng dẫn và nút CTA "Tạo Workspace đầu tiên".
+- `templates/workspaces/workspace_form.html`: Giao diện tạo workspace với validate tên và timezone trực quan.
+- `templates/workspaces/workspace_detail.html`: Trang tổng quan workspace tối thiểu, hiển thị thông tin ranh giới cách ly UUID, vai trò người dùng, số thành viên, và nút chỉnh sửa (chỉ hiển thị với Chủ).
+- `templates/workspaces/workspace_edit.html`: Giao diện sửa thông tin dành riêng cho Chủ.
+- `templates/base.html` & `templates/dashboard.html`: Tích hợp hiển thị workspace đang chọn trên thanh điều hướng và trang Dashboard của người dùng.
+
+---
+
+
+## 5. Kết quả Kiểm thử & Cách ly Database (Validation)
 
 - **PostgreSQL Database & Cách ly Kiểm thử (Test Database Isolation):**
   - Đã kết nối và xác nhận trực tiếp trên PostgreSQL 17.11 (Supabase Session Pooler).
   - **Chứng minh cách ly độc lập:** Cấu hình rõ ràng `DATABASES["default"]["TEST"]` trong `core/settings.py` (hỗ trợ `TEST_DATABASE_URL` và `TEST_DATABASE_NAME`). CSDL ứng dụng thực tế (`postgres`) và CSDL test runner (`test_postgres`) là hai database riêng biệt trong hệ thống PostgreSQL (đã kiểm chứng qua truy vấn kích thước catalog: `postgres` 11 MB, `test_postgres` ~8 MB; bảng người dùng ứng dụng trên `postgres` hoàn toàn không bị ảnh hưởng bởi test).
-- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`, `accounts.0003_accountemailidentity_token_version`) áp dụng thành công 100% trên PostgreSQL.
-- **Toàn bộ Bộ kiểm thử tự động (41/41 tests Passed):**
+- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`, `accounts.0003_accountemailidentity_token_version`, `workspaces.0001_initial`) áp dụng thành công 100% trên PostgreSQL.
+- **Toàn bộ Bộ kiểm thử tự động (56/56 tests Passed):**
   - **15 tests** `core/tests_b00_runtime.py`: Pass 100% (fail-fast, billing disabled, auth cơ bản, staticfiles).
-  - **26 tests** `core/tests_b00_email_identity.py`: Pass 100%:
-    - Chuẩn hóa email, ràng buộc unique DB, reset verification khi đổi email.
-    - Chặn đăng nhập mơ hồ giữa 2 user khác nhau (Ambiguous Login Prevention).
-    - Chu kỳ tạo & xác minh token; bảo đảm token dùng một lần duy nhất (Replay Attack Rejected).
-    - Token mất hiệu lực khi đổi mật khẩu, đổi email, hoặc đổi qua lại email cũ (`token_version`).
-    - Gửi email qua `transaction.on_commit` không phát tán khi rollback.
-    - Chịu lỗi SMTP: bảo toàn tài khoản, không phạt cooldown oan, không ghi lộ token/URL vào logs.
-    - Đồng bộ email ở mọi đường ghi (`post_save` signal, Django Admin `save_model`).
-    - Kiểm thử cạnh tranh đồng thời đa luồng (`TransactionTestCase` với `threading.Barrier` và `select_for_update()`).
-    - Migration backfill dừng khi gặp duplicate/invalid email; luồng giao diện đăng ký & xác minh.
+  - **26 tests** `core/tests_b00_email_identity.py`: Pass 100% (chuẩn hóa email, single-use token, atomic concurrency lock `select_for_update`, out-of-transaction email, SMTP error handling, signals & admin write-path sync).
+  - **15 tests** `core/tests_b01_workspaces.py`: Pass 100%:
+    1. Xác nhận test runner chạy trên database test độc lập (`test_postgres`).
+    2. Người dùng chưa đăng nhập bị chặn (chuyển hướng 302 về login) trên tất cả các routes workspace.
+    3. Tạo workspace atomic sinh đúng 1 `Membership(OWNER, IN_HOUSE, ACTIVE, ai_use_allowed=True)`, không cấp staff/superuser.
+    4. Validation tên (1-100 ký tự, strip whitespace, không rỗng) và múi giờ IANA.
+    5. Rollback atomic khi gặp lỗi: không để lại workspace hoặc membership mồ côi/dở dang.
+    6. Danh sách workspace hiển thị riêng cho từng user; người chưa có workspace thấy hướng dẫn và CTA tạo mới.
+    7. Cách ly dữ liệu: người ngoài workspace truy cập trực tiếp bằng ID (detail, edit, switch) nhận 404 (chống enumeration).
+    8. Client không thể giả mạo `owner_user` hoặc `access_role` để leo thang đặc quyền.
+    9. Ràng buộc CSDL `UniqueConstraint(workspace, user)` từ chối tạo trùng membership.
+    10. Membership bị vô hiệu hóa (`INACTIVE`) lập tức mất quyền ở request kế tiếp, kể cả session còn lưu ID cũ.
+    11. Vai trò `MEMBER` xem được tổng quan (200), nhưng truy cập hoặc POST sửa thông tin workspace bị chặn 403 (`PermissionDenied`).
+    12. Người dùng tham gia nhiều workspace chuyển đổi trơn tru và session cập nhật đúng ranh giới.
+    13. Các đường ghi bảo toàn tính nhất quán một Chủ duy nhất, từ chối tạo lệch giữa `owner_user` và `OWNER`.
+    14. Admin model save bảo toàn tính nhất quán giữa `owner_user` và `Membership OWNER`.
+    15. Context processor tự động dọn session khi membership bị vô hiệu và fallback an toàn sang workspace active khác.
 

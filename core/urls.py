@@ -12,5 +12,6 @@ urlpatterns = [
     path("pricing/", pricing_view, name="pricing"),
     path("dashboard/", dashboard, name="dashboard"),
     path("auth/", include("apps.accounts.urls")),
+    path("workspaces/", include("apps.workspaces.urls")),
     path("payments/", include("apps.payments.urls")),
 ]

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}{{ workspace.name }} — Tổng quan Workspace{% endblock %}
+
+{% block content %}
+<section class="dashboard-page">
+  <div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+        <p class="eyebrow" style="margin: 0;">Tổng quan Workspace</p>
+        {% if is_owner %}
+          <span class="badge badge-pro" style="font-size: 11px;">Chủ workspace</span>
+        {% else %}
+          <span class="badge" style="background: #e8f0fe; color: #1a73e8; font-size: 11px;">Thành viên</span>
+        {% endif %}
+      </div>
+      <h1 style="margin: 0 0 8px 0;">{{ workspace.name }}</h1>
+      <p class="muted" style="margin: 0;">Múi giờ chuẩn: <strong>{{ workspace.timezone }}</strong></p>
+    </div>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <a href="{% url 'workspaces:list' %}" class="btn">← Tất cả Workspaces</a>
+      {% if is_owner %}
+        <a href="{% url 'workspaces:edit' workspace.id %}" class="btn btn-primary">Chỉnh sửa thông tin</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="dashboard-grid" style="margin-top: 24px;">
+    <article class="card stat-card">
+      <span class="muted">Tên Workspace</span>
+      <strong>{{ workspace.name }}</strong>
+    </article>
+    <article class="card stat-card">
+      <span class="muted">Vai trò của bạn</span>
+      <strong>{{ membership.get_access_role_display }}</strong>
+      <span class="badge" style="margin-top: 4px; width: fit-content; background: #e6f4ea; color: #137333; font-size: 11px;">
+        {{ membership.get_status_display }}
+      </span>
+    </article>
+    <article class="card stat-card">
+      <span class="muted">Chủ sở hữu</span>
+      <strong>{{ workspace.owner_user.username }}</strong>
+      <small class="muted" style="font-size: 12px;">{{ workspace.owner_user.email|default:"Không có email" }}</small>
+    </article>
+    <article class="card stat-card">
+      <span class="muted">Thành viên đang hoạt động</span>
+      <strong>{{ members_count }}</strong>
+    </article>
+  </div>
+
+  <div class="card" style="margin-top: 24px;">
+    <h3 style="margin-top: 0; margin-bottom: 12px;">Thông tin kỹ thuật &amp; Ranh giới cách ly (B01)</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+      <tbody>
+        <tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 10px 0; color: var(--muted); width: 220px;">Mã định danh (UUID):</td>
+          <td style="padding: 10px 0;"><code>{{ workspace.id }}</code></td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 10px 0; color: var(--muted);">Múi giờ IANA:</td>
+          <td style="padding: 10px 0;"><strong>{{ workspace.timezone }}</strong></td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 10px 0; color: var(--muted);">Hình thức quan hệ của bạn:</td>
+          <td style="padding: 10px 0;">{{ membership.get_employment_type_display }}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 10px 0; color: var(--muted);">Quyền sử dụng AI (BYOK):</td>
+          <td style="padding: 10px 0;">
+            {% if membership.ai_use_allowed %}
+              <span style="color: #137333;">✓ Được phép</span>
+            {% else %}
+              <span style="color: #5f6368;">✗ Chưa cấp quyền</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 0; color: var(--muted);">Thời điểm khởi tạo:</td>
+          <td style="padding: 10px 0;">{{ workspace.created_at|date:"d/m/Y H:i:s T" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

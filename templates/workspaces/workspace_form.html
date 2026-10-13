@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Tạo Workspace mới{% endblock %}
+
+{% block content %}
+<section style="max-width: 600px; margin: 40px auto;">
+  <div class="card">
+    <div style="margin-bottom: 24px;">
+      <p class="eyebrow">Khởi tạo</p>
+      <h1 style="font-size: 1.75rem; margin-top: 4px;">Tạo Workspace mới</h1>
+      <p class="muted">Khởi tạo không gian làm việc an toàn và cách ly riêng biệt cho doanh nghiệp hoặc dự án của bạn.</p>
+    </div>
+
+    {% if form.non_field_errors %}
+      <div class="form-alert" style="margin-bottom: 20px;">
+        {% for error in form.non_field_errors %}
+          <div>{{ error }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+
+      <div class="form-field">
+        <label for="{{ form.name.id_for_label }}"><strong>{{ form.name.label }}</strong></label>
+        {{ form.name }}
+        {% if form.name.errors %}
+          <div style="color: #b91c1c; font-size: 13px; margin-top: 4px;">
+            {% for error in form.name.errors %}{{ error }}{% endfor %}
+          </div>
+        {% endif %}
+        {% if form.name.help_text %}
+          <small class="muted">{{ form.name.help_text }}</small>
+        {% endif %}
+      </div>
+
+      <div class="form-field">
+        <label for="{{ form.timezone.id_for_label }}"><strong>{{ form.timezone.label }}</strong></label>
+        {{ form.timezone }}
+        {% if form.timezone.errors %}
+          <div style="color: #b91c1c; font-size: 13px; margin-top: 4px;">
+            {% for error in form.timezone.errors %}{{ error }}{% endfor %}
+          </div>
+        {% endif %}
+        {% if form.timezone.help_text %}
+          <small class="muted">{{ form.timezone.help_text }}</small>
+        {% endif %}
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+        <a href="{% url 'workspaces:list' %}" class="btn">Hủy bỏ</a>
+        <button type="submit" class="btn btn-primary">Khởi tạo Workspace</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

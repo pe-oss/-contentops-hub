@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Danh sách Workspaces{% endblock %}
+
+{% block content %}
+<section class="dashboard-page">
+  <div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 24px;">
+    <div>
+      <p class="eyebrow">Workspaces</p>
+      <h1>Không gian làm việc của bạn</h1>
+      <p class="muted">Danh sách các workspace bạn đang tham gia với vai trò hợp lệ.</p>
+    </div>
+    <div>
+      <a class="btn btn-primary" href="{% url 'workspaces:create' %}">+ Tạo Workspace mới</a>
+    </div>
+  </div>
+
+  {% if workspaces %}
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px;">
+      {% for ws in workspaces %}
+        <article class="card" style="display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border); padding: 20px;">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 12px;">
+              <h2 style="font-size: 1.25rem; margin: 0;">{{ ws.name }}</h2>
+              {% if ws.owner_user_id == request.user.id %}
+                <span class="badge badge-pro" style="font-size: 11px;">Chủ workspace</span>
+              {% else %}
+                <span class="badge" style="font-size: 11px; background: #e8f0fe; color: #1a73e8;">Thành viên</span>
+              {% endif %}
+            </div>
+            <p class="muted" style="font-size: 13px; margin-bottom: 6px;">Múi giờ: <strong>{{ ws.timezone }}</strong></p>
+            <p class="muted" style="font-size: 13px; margin-bottom: 6px;">Chủ: <strong>{{ ws.owner_user.username }}</strong></p>
+            <p class="muted" style="font-size: 12px; margin-bottom: 16px;">Tạo ngày: {{ ws.created_at|date:"d/m/Y H:i" }}</p>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;">
+            <a class="btn btn-primary" style="font-size: 13px; padding: 6px 14px;" href="{% url 'workspaces:detail' ws.id %}">Vào tổng quan</a>
+            {% if ws.id != current_workspace.id %}
+              <form method="post" action="{% url 'workspaces:switch' ws.id %}" style="margin: 0;">
+                {% csrf_token %}
+                <button type="submit" class="btn" style="font-size: 13px; padding: 6px 12px;">Đặt làm đang chọn</button>
+              </form>
+            {% else %}
+              <span class="badge" style="background: #e6f4ea; color: #137333; align-self: center; font-size: 12px;">Đang chọn</span>
+            {% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card" style="text-align: center; padding: 48px 24px;">
+      <div style="font-size: 48px; margin-bottom: 16px;">🏢</div>
+      <h2 style="margin-bottom: 8px;">Bạn chưa tham gia workspace nào</h2>
+      <p class="muted" style="max-width: 520px; margin: 0 auto 24px auto;">
+        Workspace là nơi cách ly toàn bộ nội dung, thương hiệu và nhân sự của doanh nghiệp. Hãy khởi tạo workspace đầu tiên của bạn để bắt đầu.
+      </p>
+      <a class="btn btn-primary" href="{% url 'workspaces:create' %}" style="padding: 12px 24px; font-size: 15px;">
+        + Tạo Workspace đầu tiên ngay
+      </a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

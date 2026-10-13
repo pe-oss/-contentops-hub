@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "apps.accounts",
     "apps.payments",
+    "apps.workspaces",
 ]
 
 MIDDLEWARE = [
@@ -104,6 +105,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "core.context_processors.billing_context",
+                "apps.workspaces.context_processors.workspace_context",
             ],
         },
     },
