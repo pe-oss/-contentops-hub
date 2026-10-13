@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 
-from .models import AccessRole, EmploymentType, Membership, MembershipStatus, Workspace, validate_timezone
+from .models import AccessRole, BrandProfile, EmploymentType, Membership, MembershipStatus, Workspace, validate_timezone
 from .selectors import get_active_membership, get_user_workspaces, get_workspace_for_user
 
 User = get_user_model()
@@ -565,4 +565,97 @@ def reactivate_membership(
     membership.status = MembershipStatus.ACTIVE
     membership.save(update_fields=["status", "updated_at"])
     return membership
+
+
+
+class ConcurrencyConflictError(Exception):
+    """Lỗi xung đột phiên bản dữ liệu đồng thời (Optimistic Concurrency Control, HTTP 409)."""
+    pass
+
+
+@transaction.atomic
+def save_brand_profile(
+    *,
+    user: Any,
+    workspace: Workspace,
+    name: str,
+    product_summary: str,
+    target_audience: str,
+    tone_of_voice: str = "",
+    avoid_guidelines: str = "",
+    allowed_claims: str = "",
+    source_urls: list[str] | None = None,
+    expected_revision: int | None = None,
+) -> BrandProfile:
+    """
+    Tạo hoặc cập nhật hồ sơ thương hiệu cho Workspace theo Spec B03 (mục 3.1, 4, 9, 10, 14):
+    - Chỉ Chủ workspace (OWNER) có quyền tạo hoặc sửa.
+    - Thành viên ném PermissionDenied (HTTP 403).
+    - Người ngoài không có quyền ném PermissionDenied hoặc Http404 (ở tầng view).
+    - Hỗ trợ Optimistic Concurrency Control: nếu expected_revision được truyền vào và
+      không khớp với revision hiện tại trong CSDL, ném ConcurrencyConflictError (HTTP 409).
+    - Mỗi lần cập nhật thành công, revision tự động tăng thêm 1.
+    - Ghi nhận updated_by = user.
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+
+    # 1. Kiểm tra quyền Chủ workspace
+    membership = get_active_membership(user, workspace)
+    if not membership or not membership.is_active or membership.access_role != AccessRole.OWNER:
+        raise PermissionDenied("Chỉ Chủ workspace mới có quyền cập nhật hồ sơ thương hiệu.")
+
+    if workspace.owner_user_id != user.id:
+        raise PermissionDenied("Thông tin Chủ workspace không nhất quán.")
+
+    # 2. Khóa dòng BrandProfile để đảm bảo tính tuần tự
+    brand_profile = (
+        BrandProfile.objects.select_for_update()
+        .filter(workspace=workspace)
+        .first()
+    )
+
+    clean_urls = list(source_urls or [])
+
+    if brand_profile:
+        # Kiểm tra xung đột phiên bản
+        if expected_revision is not None and brand_profile.revision != expected_revision:
+            raise ConcurrencyConflictError(
+                f"Hồ sơ thương hiệu đã bị sửa đổi ở phiên khác (phiên bản hiện tại: {brand_profile.revision}, phiên bản của bạn: {expected_revision}). Vui lòng kiểm tra lại để tránh ghi đè dữ liệu."
+            )
+
+        brand_profile.name = name
+        brand_profile.product_summary = product_summary
+        brand_profile.target_audience = target_audience
+        brand_profile.tone_of_voice = tone_of_voice or ""
+        brand_profile.avoid_guidelines = avoid_guidelines or ""
+        brand_profile.allowed_claims = allowed_claims or ""
+        brand_profile.source_urls = clean_urls
+        brand_profile.revision += 1
+        brand_profile.updated_by = user
+        brand_profile.full_clean()
+        brand_profile.save()
+        return brand_profile
+    else:
+        # Trường hợp tạo mới
+        if expected_revision is not None and expected_revision > 0:
+            raise ConcurrencyConflictError(
+                f"Hồ sơ thương hiệu chưa tồn tại nhưng yêu cầu phiên bản {expected_revision}."
+            )
+
+        brand_profile = BrandProfile(
+            workspace=workspace,
+            name=name,
+            product_summary=product_summary,
+            target_audience=target_audience,
+            tone_of_voice=tone_of_voice or "",
+            avoid_guidelines=avoid_guidelines or "",
+            allowed_claims=allowed_claims or "",
+            source_urls=clean_urls,
+            revision=1,
+            updated_by=user,
+        )
+        brand_profile.full_clean()
+        brand_profile.save()
+        return brand_profile
 

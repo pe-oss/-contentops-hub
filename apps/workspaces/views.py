@@ -11,9 +11,16 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import View
 
 from apps.accounts.services import normalize_email
-from .forms import MemberUpdateForm, WorkspaceCreateForm, WorkspaceInvitationForm, WorkspaceUpdateForm
-from .models import AccessRole, EmploymentType, Invitation, Membership, MembershipStatus
+from .forms import (
+    BrandProfileForm,
+    MemberUpdateForm,
+    WorkspaceCreateForm,
+    WorkspaceInvitationForm,
+    WorkspaceUpdateForm,
+)
+from .models import AccessRole, BrandProfile, EmploymentType, Invitation, Membership, MembershipStatus
 from .selectors import (
+    get_brand_profile,
     get_invitation_by_id_for_workspace,
     get_invitation_by_token,
     get_membership_by_id_for_workspace,
@@ -23,6 +30,7 @@ from .selectors import (
     get_workspace_members,
 )
 from .services import (
+    ConcurrencyConflictError,
     accept_workspace_invitation,
     create_workspace_invitation,
     create_workspace_with_owner,
@@ -30,6 +38,7 @@ from .services import (
     reactivate_membership,
     resend_workspace_invitation,
     revoke_workspace_invitation,
+    save_brand_profile,
     switch_active_workspace,
     update_member_settings,
     update_workspace_info,
@@ -171,6 +180,136 @@ class WorkspaceSwitchView(View):
         messages.info(request, f"Đã chuyển sang workspace '{workspace.name}'.")
         return redirect("workspaces:detail", workspace_id=workspace.id)
 
+
+
+@method_decorator(login_required, name="dispatch")
+class BrandProfileView(View):
+    """
+    Xem và chỉnh sửa hồ sơ thương hiệu của Workspace theo Spec B03 (mục 3.1, 4, 7 UI02, 10, 14):
+    - GET: Hiển thị hồ sơ thương hiệu.
+      - OWNER: Xem form đầy đủ và có thể chỉnh sửa; cảnh báo revision.
+      - MEMBER: Chế độ chỉ đọc (read-only) để tham khảo, không có nút sửa.
+      - Outsider: Nhận 404 Not Found (get_workspace_for_user).
+    - POST: Cập nhật hồ sơ thương hiệu.
+      - OWNER: Cập nhật thành công -> tăng revision, thông báo và redirect.
+      - MEMBER: Nhận 403 Forbidden.
+      - Outsider: Nhận 404 Not Found.
+      - Xung đột đồng thời (ConcurrencyConflictError): Nhận 409 Conflict, giữ nguyên dữ liệu đã nhập.
+    """
+
+    def get(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        brand_profile = get_brand_profile(workspace)
+        is_owner = membership.access_role == AccessRole.OWNER
+
+        initial_data = {}
+        if brand_profile:
+            initial_data = {
+                "name": brand_profile.name,
+                "product_summary": brand_profile.product_summary,
+                "target_audience": brand_profile.target_audience,
+                "tone_of_voice": brand_profile.tone_of_voice,
+                "avoid_guidelines": brand_profile.avoid_guidelines,
+                "allowed_claims": brand_profile.allowed_claims,
+                "source_urls": "\n".join(brand_profile.source_urls or []),
+                "expected_revision": brand_profile.revision,
+            }
+        else:
+            initial_data = {
+                "name": workspace.name,
+                "expected_revision": 0,
+            }
+
+        form = BrandProfileForm(initial=initial_data)
+
+        return render(
+            request,
+            "workspaces/brand_profile.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "brand_profile": brand_profile,
+                "form": form,
+                "is_owner": is_owner,
+            },
+        )
+
+    def post(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        is_owner = membership.access_role == AccessRole.OWNER
+
+        if not is_owner:
+            raise PermissionDenied("Chỉ Chủ workspace mới có quyền cập nhật hồ sơ thương hiệu.")
+
+        form = BrandProfileForm(request.POST)
+        if not form.is_valid():
+            brand_profile = get_brand_profile(workspace)
+            return render(
+                request,
+                "workspaces/brand_profile.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "brand_profile": brand_profile,
+                    "form": form,
+                    "is_owner": is_owner,
+                },
+                status=400,
+            )
+
+        expected_revision = form.cleaned_data.get("expected_revision")
+        try:
+            brand_profile = save_brand_profile(
+                user=request.user,
+                workspace=workspace,
+                name=form.cleaned_data["name"],
+                product_summary=form.cleaned_data["product_summary"],
+                target_audience=form.cleaned_data["target_audience"],
+                tone_of_voice=form.cleaned_data.get("tone_of_voice", ""),
+                avoid_guidelines=form.cleaned_data.get("avoid_guidelines", ""),
+                allowed_claims=form.cleaned_data.get("allowed_claims", ""),
+                source_urls=form.cleaned_data.get("source_urls", []),
+                expected_revision=expected_revision,
+            )
+            messages.success(
+                request,
+                f"Đã lưu hồ sơ thương hiệu thành công (Phiên bản {brand_profile.revision}).",
+            )
+            return redirect("workspaces:brand_profile", workspace_id=workspace.id)
+        except ConcurrencyConflictError as exc:
+            brand_profile = get_brand_profile(workspace)
+            form.add_error(None, str(exc))
+            # Cập nhật lại expected_revision mới cho form
+            if brand_profile:
+                form.fields["expected_revision"].initial = brand_profile.revision
+            return render(
+                request,
+                "workspaces/brand_profile.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "brand_profile": brand_profile,
+                    "form": form,
+                    "is_owner": is_owner,
+                    "conflict_error": str(exc),
+                },
+                status=409,
+            )
+        except ValidationError as exc:
+            brand_profile = get_brand_profile(workspace)
+            form.add_error(None, exc)
+            return render(
+                request,
+                "workspaces/brand_profile.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "brand_profile": brand_profile,
+                    "form": form,
+                    "is_owner": is_owner,
+                },
+                status=400,
+            )
 
 
 @method_decorator(login_required, name="dispatch")

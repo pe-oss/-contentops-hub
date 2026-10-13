@@ -100,3 +100,15 @@ class InvitationAdmin(admin.ModelAdmin):
             raise ValidationError("Không thể tạo lời mời cho vai trò OWNER.")
         super().save_model(request, obj, form, change)
 
+
+
+from .models import BrandProfile
+
+
+@admin.register(BrandProfile)
+class BrandProfileAdmin(admin.ModelAdmin):
+    list_display = ("name", "workspace", "revision", "updated_by", "updated_at")
+    list_filter = ("revision", "updated_at")
+    search_fields = ("name", "workspace__name", "product_summary")
+    readonly_fields = ("id", "revision", "created_at", "updated_at")
+

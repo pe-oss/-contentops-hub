@@ -19,6 +19,7 @@
     </div>
     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
       <a href="{% url 'workspaces:list' %}" class="btn">← Tất cả Workspaces</a>
+      <a href="{% url 'workspaces:brand_profile' workspace.id %}" class="btn">🏷️ Hồ sơ thương hiệu</a>
       <a href="{% url 'workspaces:members' workspace.id %}" class="btn">👥 Thành viên &amp; Lời mời</a>
       {% if is_owner %}
         <a href="{% url 'workspaces:edit' workspace.id %}" class="btn btn-primary">Chỉnh sửa thông tin</a>

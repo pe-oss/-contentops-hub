@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import QuerySet
 from django.http import Http404
 
-from .models import Membership, MembershipStatus, Workspace
+from .models import BrandProfile, Membership, MembershipStatus, Workspace
 
 User = get_user_model()
 
@@ -165,4 +165,14 @@ def get_membership_by_id_for_workspace(
     if not membership:
         raise Http404("Thành viên không tồn tại trong workspace này.")
     return membership
+
+
+
+def get_brand_profile(workspace: Workspace) -> BrandProfile | None:
+    """
+    Lấy hồ sơ thương hiệu của workspace nếu có.
+    """
+    if not workspace:
+        return None
+    return BrandProfile.objects.filter(workspace=workspace).select_related("updated_by").first()
 

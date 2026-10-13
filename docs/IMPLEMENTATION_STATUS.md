@@ -6,7 +6,7 @@
 
 - **Spec cơ sở:** `docs/Spec-Ban-Content-Marketing-v1.0.md` (Phiên bản v1.0).
 - **Mốc xuất phát:** Nhánh `chore/boilerplate-baseline` (commit `4fd4046`).
-- **Nhánh hiện tại:** `feat/b02-workspace-members` (tiếp nối nhánh `feat/b01-workspaces`, commit `447fdd9`).
+- **Nhánh hiện tại:** `feat/b03` (tiếp nối nhánh `feat/b02-workspace-members`, commit `bbf4938`).
 
 | Giai đoạn / Nhiệm vụ | Trạng thái | Ghi chú |
 |---|---|---|
@@ -14,10 +14,14 @@
 | **B00.2 — Chuẩn hóa Email identity & verification** | **HOÀN TẤT** | AccountEmailIdentity unique, chặn login mơ hồ, token verification, rate limit, migration backfill an toàn |
 | **B01 — Workspace & Cách ly dữ liệu (Tenant Isolation)** | **HOÀN TẤT** | Workspace UUID, membership OWNER nguyên tử, cách ly truy cập 404, kiểm soát quyền sửa 403, chống giả mạo |
 | **B02 — Thành viên, Lời mời & Phân quyền chi tiết** | **HOÀN TẤT** | Spec mục 3.1, 3.2, 9, 10, 13 (Lời mời token SHA-256 hash, hạn 7 ngày, nhận atomic lock DB, ma trận quyền OWNER/MEMBER, bảo vệ Chủ) |
-| **B03 — Pipeline Sinh nội dung & AI Gateway (BYOK)** | CHƯA LÀM | Spec mục 10, 11 (Dừng trước B03 theo yêu cầu) |
-| **B04 — Quality Gate & Duyệt bài (Review/Approval)** | CHƯA LÀM | Spec mục 12, 13 |
-| **B05 — Publishing Channel Adapters & Automation** | CHƯA LÀM | Spec mục 14, 15 |
-| **B06 — Analytics, Performance Loop & Audit Trail** | CHƯA LÀM | Spec mục 16, 17, 19 |
+| **B03 — Hồ sơ thương hiệu (Brand Profile)** | **HOÀN TẤT** | Spec mục 4, 7 UI02, 9, 10, 13, 14 AC15 (OneToOne unique, validate trường dữ liệu, HTTPS source URLs, auto-increment revision, optimistic concurrency 409, snapshot bất biến) |
+| **B04 — Gói, kế hoạch, phân công (Packages & Planning)** | CHƯA LÀM | Spec mục 4, 5 F02, 9, 13 B04 (Dừng trước B04 theo quy định) |
+| **B05 — Phiên bản và luồng viết/biên tập (Writing/Editing)** | CHƯA LÀM | Spec mục 5 F03-F04, 9, 13 B05 |
+| **B06 — Chủ duyệt, mở lại, trạng thái (Approval & Lifecycle)** | CHƯA LÀM | Spec mục 5 F05, 9, 13 B06 |
+| **B07 — Xuất bản và hoàn thành gói (Publishing)** | CHƯA LÀM | Spec mục 5 F06, 9, 13 B07 |
+| **B08 — Blocker, đổi người, thu hồi (Task Reassignment)** | CHƯA LÀM | Spec mục 6, 9, 13 B08 |
+| **B09 — Tổng quan, Việc của tôi, thông báo (Dashboard & Tasks)** | CHƯA LÀM | Spec mục 7 UI01/UI06, 8, 9, 13 B09 |
+| **B10 — Responsive, lỗi, backup, QA lõi (Core QA)** | CHƯA LÀM | Spec mục 13 B10, 14 AC01-AC18 |
 
 ---
 
@@ -191,35 +195,78 @@
 
 ---
 
+## 6. Chi tiết thực hiện B03 (Hồ sơ thương hiệu - Brand Profile)
+
+### 6.1. Mô hình `BrandProfile` & Ràng buộc toàn vẹn CSDL (Spec mục 4 & 9)
+- **Mô hình `BrandProfile` (`apps/workspaces/models.py`):**
+  - Khóa chính: `id` kiểu `UUIDField` (`default=uuid.uuid4`, editable=False).
+  - Khóa ngoại: `workspace` quan hệ `OneToOneField` với `Workspace` (`related_name="brand_profile"`, `on_delete=models.CASCADE`), đảm bảo mỗi workspace có duy nhất một hồ sơ thương hiệu.
+  - Trường bắt buộc:
+    - `name`: Tên thương hiệu, `CharField(max_length=100)`, strip whitespace, không rỗng.
+    - `product_summary`: Sản phẩm / Dịch vụ chủ lực, `TextField(max_length=5000)`, strip whitespace, không rỗng.
+    - `target_audience`: Khách hàng mục tiêu, `TextField(max_length=3000)`, strip whitespace, không rỗng.
+  - Trường tùy chọn (Brand Guidelines):
+    - `tone_of_voice`: Giọng văn thương hiệu, `TextField(max_length=3000, blank=True)`.
+    - `avoid_guidelines`: Điều cần tránh (từ ngữ, thông điệp cấm kỵ), `TextField(max_length=3000, blank=True)`.
+    - `allowed_claims`: Tuyên bố, cam kết được phép sử dụng, `TextField(max_length=3000, blank=True)`.
+  - Kiểm tra URL nguồn tham khảo:
+    - `source_urls`: `JSONField(default=list, blank=True)`, tối đa 10 URL.
+    - Validate bắt buộc giao thức HTTPS và tên miền hợp lệ; cấm tuyệt đối HTTP hoặc scheme khác (Spec mục 4).
+  - Quản lý phiên bản & Người cập nhật:
+    - `revision`: `PositiveIntegerField(default=1)`, tự động tăng tuần tự sau mỗi lần cập nhật thành công.
+    - `updated_by`: `ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)`, ghi nhận người cập nhật.
+    - `created_at`, `updated_at`: mốc thời gian lưu UTC.
+  - Phương thức `to_snapshot()`: Trích xuất snapshot JSON độc lập chứa đầy đủ thông tin thương hiệu tại `revision` hiện tại, phục vụ gắn vào Gói content (Packages) ở các milestone sau mà không bị ảnh hưởng khi hồ sơ sau đó bị sửa đổi (Spec F02 & AC15).
+- **Migration:** `workspaces.0003_brandprofile` đã tạo và áp dụng thành công trên PostgreSQL.
+
+### 6.2. Service Layer & Xử lý Tranh chấp Phiên bản Đồng thời (Optimistic Concurrency Control)
+- `apps/workspaces/services.py`:
+  - `save_brand_profile()`: Bọc trong transaction nguyên tử `@transaction.atomic`.
+  - Khóa dòng bằng `select_for_update()` trên bản ghi `BrandProfile` của workspace để tuần tự hóa các thao tác cập nhật.
+  - Hỗ trợ cơ chế Optimistic Concurrency Control (Spec AC10): Nếu `expected_revision` được truyền lên từ form client không khớp với `revision` thực tế trong CSDL, hệ thống ném `ConcurrencyConflictError` (HTTP 409 Conflict) và không ghi đè dữ liệu; bảo toàn nội dung người dùng vừa nhập để họ kiểm tra lại.
+  - Tự động tăng `revision += 1` khi lưu thành công.
+
+### 6.3. Ma trận Phân quyền B03 & Cách ly Workspace
+- **Phân quyền Backend (Spec mục 3.1 & 10):**
+  - **Chủ workspace (OWNER):** Có toàn quyền xem và tạo/sửa hồ sơ thương hiệu (GET 200, POST 302/redirect).
+  - **Thành viên (MEMBER):** Có quyền xem hồ sơ ở chế độ chỉ đọc (GET 200); nếu gửi POST cố tình sửa đổi sẽ bị chặn ngay lập tức với mã lỗi **HTTP 403 Forbidden** (`PermissionDenied`).
+  - **Người ngoài workspace (OUTSIDER) / Thành viên bị vô hiệu hóa (INACTIVE):** Khi truy cập URL hồ sơ thương hiệu nhận ngay mã lỗi **HTTP 404 Not Found** (`get_workspace_for_user`), hoàn toàn không phân biệt hoặc tiết lộ sự tồn tại của workspace.
+
+### 6.4. Giao diện Người dùng (UI02 Template & HTMX)
+- `templates/workspaces/brand_profile.html`:
+  - Tương thích giao diện Bootstrap/Custom CSS hiện có.
+  - Banner cảnh báo quy tắc snapshot độc lập theo Spec UI02 & AC15: ghi rõ snapshot gói cũ không tự đổi khi sửa hồ sơ thương hiệu.
+  - Hiển thị badge vai trò (Chủ workspace / Thành viên chỉ đọc) và số phiên bản (`Revision X`).
+  - Phân nhánh hiển thị:
+    - Với Chủ: Form đầy đủ có các ô nhập liệu, help text, hiển thị lỗi validation giữ nguyên nội dung đã nhập, và banner cảnh báo lỗi xung đột phiên bản (HTTP 409).
+    - Với Thành viên: Thẻ hiển thị quy chuẩn thương hiệu trang nhã, làm nổi bật điều cần tránh (màu đỏ) và tuyên bố được phép (màu xanh), danh sách URL nguồn có link mở tab mới an toàn.
+  - Tích hợp nút điều hướng "🏷️ Hồ sơ thương hiệu" trên trang chi tiết Workspace (`workspace_detail.html`).
 
 
-## 6. Kết quả Kiểm thử & Cách ly Database (Validation)
+---
+
+
+
+## 7. Kết quả Kiểm thử & Cách ly Database (Validation)
 
 - **PostgreSQL Database & Cách ly Kiểm thử (Test Database Isolation):**
   - Đã kết nối và xác nhận trực tiếp trên PostgreSQL 17.11 (Supabase Session Pooler).
   - **Chứng minh cách ly độc lập:** Cấu hình rõ ràng `DATABASES["default"]["TEST"]` trong `core/settings.py` (hỗ trợ `TEST_DATABASE_URL` và `TEST_DATABASE_NAME`). CSDL ứng dụng thực tế (`postgres`) và CSDL test runner (`test_postgres`) là hai database riêng biệt trong hệ thống PostgreSQL (đã kiểm chứng qua truy vấn kích thước catalog: `postgres` 11 MB, `test_postgres` ~8 MB; bảng người dùng ứng dụng trên `postgres` hoàn toàn không bị ảnh hưởng bởi test).
-- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`, `accounts.0003_accountemailidentity_token_version`, `workspaces.0001_initial`, `workspaces.0002_invitation`) áp dụng thành công 100% trên PostgreSQL.
-- **Toàn bộ Bộ kiểm thử tự động (74/74 tests Passed):**
+- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`, `accounts.0003_accountemailidentity_token_version`, `workspaces.0001_initial`, `workspaces.0002_invitation`, `workspaces.0003_brandprofile`) áp dụng thành công 100% trên PostgreSQL.
+- **Toàn bộ Bộ kiểm thử tự động (84/84 tests Passed):**
   - **15 tests** `core/tests_b00_runtime.py`: Pass 100% (fail-fast, billing disabled, auth cơ bản, staticfiles).
   - **26 tests** `core/tests_b00_email_identity.py`: Pass 100% (chuẩn hóa email, single-use token, atomic concurrency lock `select_for_update`, out-of-transaction email, SMTP error handling, signals & admin write-path sync).
   - **15 tests** `core/tests_b01_workspaces.py`: Pass 100% (tenant isolation, single-owner consistency, HTTP 403/404, session fallback).
-  - **18 tests** `core/tests_b02_workspace_members.py`: Pass 100%:
+  - **18 tests** `core/tests_b02_workspace_members.py`: Pass 100% (ma trận quyền B02, lời mời SHA-256 token hash, bảo vệ Chủ, vô hiệu hóa tức thì, concurrency lock).
+  - **10 tests** `core/tests_b03_brand_profile.py`: Pass 100%:
     1. Xác nhận test runner chạy trên database test độc lập (`test_postgres`).
-    2. Ma trận quyền B02: Chủ có quyền mời/sửa/thu hồi, thành viên bị chặn 403 khi thao tác quản trị, người ngoài nhận 404 khi truy cập workspace ID.
-    3. Tạo lời mời thành công, email chuẩn hóa, token lưu dạng SHA-256 hash (64 hex), raw token không lọt vào DB.
-    4. Chặn tạo lời mời với vai trò OWNER (ValidationError).
-    5. Chặn tạo lời mời trùng đang chờ xử lý cho cùng một email.
-    6. Chặn mời người đã là thành viên ACTIVE hoặc INACTIVE (phải kích hoạt lại qua quản lý thành viên).
-    7. Gửi email sau commit; lỗi gửi mail không rollback lời mời đã tạo.
-    8. Gửi lại có cooldown 60s; sau khi thu hồi không thể nhận hoặc gửi lại.
-    9. Nhận lời mời yêu cầu đăng nhập (redirect kèm next parameter) và email identity đã xác minh.
-    10. Tài khoản có email khác bị chặn không được chấp nhận lời mời của email được mời.
-    11. Nhận lời mời thành công qua POST có CSRF, tạo Membership ACTIVE (role MEMBER, đúng employment_type và ai_use_allowed), cập nhật session active workspace.
-    12. Ràng buộc token an toàn: dùng một lần duy nhất, token hết hạn bị chặn, token đã thu hồi bị chặn, token giả mạo trả 404 không lộ workspace.
-    13. Bảo vệ Chủ workspace: cấm vô hiệu hóa hoặc hạ quyền Chủ.
-    14. Hiệu lực tức thì sau khi vô hiệu hóa: thành viên bị vô hiệu hóa nhận ngay 404 ở request kế tiếp, session bị xóa bỏ.
-    15. Chủ cập nhật `employment_type` và `ai_use_allowed` của thành viên thành công.
-    16. Chủ kích hoạt lại thành viên đã bị vô hiệu hóa thành công.
-    17. Lời mời bị thu hồi trước khi nhận bị chặn.
-    18. Kiểm thử cạnh tranh song song (`WorkspaceConcurrencyB02Tests`): hai request nhận đồng thời chỉ đúng 1 request thành công, không sinh membership trùng nhờ `select_for_update()` và ràng buộc DB.
+    2. Khởi tạo và tự động tăng số phiên bản `revision` tuần tự (+1) sau mỗi lần lưu.
+    3. Ràng buộc toàn vẹn CSDL: Mỗi workspace chỉ có duy nhất một BrandProfile (`OneToOneField` unique constraint).
+    4. Validation trường dữ liệu theo Spec mục 4: tên (1-100 ký tự), tóm tắt sản phẩm (1-5000 ký tự), khách hàng mục tiêu (1-3000 ký tự), không chấp nhận chuỗi chỉ chứa khoảng trắng.
+    5. Validation URL nguồn tham khảo: chỉ chấp nhận giao thức HTTPS, tối đa 10 URL, từ chối HTTP và scheme khác.
+    6. Tính bất biến của snapshot thương hiệu (`to_snapshot()`): Snapshot đã xuất tại revision cũ không bị thay đổi khi BrandProfile được cập nhật sau đó (AC15 & Spec F02).
+    7. Xử lý xung đột phiên bản đồng thời (Optimistic Concurrency Control - AC10): Truyền sai `expected_revision` lập tức trả về `ConcurrencyConflictError` (HTTP 409 Conflict), không ghi đè dữ liệu và giữ nguyên nội dung trên form.
+    8. Ma trận phân quyền B03 & Cách ly Workspace: Chủ có quyền GET (200) và POST (302/redirect); Thành viên (MEMBER) chỉ được xem (GET 200, POST 403); Người ngoài (OUTSIDER) và thành viên bị vô hiệu hóa (INACTIVE) nhận HTTP 404 Not Found.
+    9. Form validation lỗi trả về HTTP 400 và bảo toàn toàn bộ dữ liệu người dùng đã nhập.
+    10. Đăng ký quản trị Django Admin cho `BrandProfile` với các trường chỉ đọc `id`, `revision`, `created_at`, `updated_at`.
 

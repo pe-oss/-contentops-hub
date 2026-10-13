@@ -128,3 +128,161 @@ class MemberUpdateForm(forms.Form):
         label="Cho phép dùng AI",
     )
 
+
+
+class BrandProfileForm(forms.Form):
+    name = forms.CharField(
+        max_length=100,
+        label="Tên thương hiệu",
+        error_messages={"required": "Tên thương hiệu không được để trống hoặc chỉ có khoảng trắng."},
+        widget=forms.TextInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "Ví dụ: Acme Studio",
+                "autofocus": True,
+            }
+        ),
+        help_text="Từ 1 đến 100 ký tự. Bắt buộc.",
+    )
+    product_summary = forms.CharField(
+        max_length=5000,
+        label="Sản phẩm / Dịch vụ chủ lực",
+        error_messages={"required": "Thông tin sản phẩm/dịch vụ không được để trống."},
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 4,
+                "placeholder": "Mô tả sản phẩm, dịch vụ của thương hiệu...",
+            }
+        ),
+        help_text="Từ 1 đến 5.000 ký tự. Bắt buộc.",
+    )
+    target_audience = forms.CharField(
+        max_length=3000,
+        label="Khách hàng mục tiêu",
+        error_messages={"required": "Khách hàng mục tiêu không được để trống."},
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 3,
+                "placeholder": "Chân dung đối tượng độc giả, khách hàng mục tiêu...",
+            }
+        ),
+        help_text="Từ 1 đến 3.000 ký tự. Bắt buộc.",
+    )
+    tone_of_voice = forms.CharField(
+        max_length=3000,
+        required=False,
+        label="Giọng văn thương hiệu",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 3,
+                "placeholder": "Ví dụ: Chuyên nghiệp, gần gũi, truyền cảm hứng...",
+            }
+        ),
+        help_text="Tối đa 3.000 ký tự. Tùy chọn.",
+    )
+    avoid_guidelines = forms.CharField(
+        max_length=3000,
+        required=False,
+        label="Điều cần tránh (Brand Guidelines)",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 3,
+                "placeholder": "Các từ ngữ, thông điệp hoặc chủ đề cấm kỵ...",
+            }
+        ),
+        help_text="Tối đa 3.000 ký tự. Tùy chọn.",
+    )
+    allowed_claims = forms.CharField(
+        max_length=3000,
+        required=False,
+        label="Tuyên bố được phép sử dụng",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 3,
+                "placeholder": "Các cam kết, tuyên bố được phép sử dụng trong bài viết...",
+            }
+        ),
+        help_text="Tối đa 3.000 ký tự. Tùy chọn.",
+    )
+    source_urls = forms.CharField(
+        required=False,
+        label="Danh sách URL nguồn tham khảo",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control font-monospace",
+                "rows": 3,
+                "placeholder": "https://example.com/brand-guidelines\nhttps://example.com/specs",
+            }
+        ),
+        help_text="Mỗi dòng một URL. Tối đa 10 URL. Bắt buộc sử dụng giao thức HTTPS.",
+    )
+    expected_revision = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+    def clean_name(self) -> str:
+        name = (self.cleaned_data.get("name") or "").strip()
+        if not name:
+            raise forms.ValidationError("Tên thương hiệu không được để trống hoặc chỉ có khoảng trắng.")
+        if len(name) > 100:
+            raise forms.ValidationError("Tên thương hiệu không được vượt quá 100 ký tự.")
+        return name
+
+    def clean_product_summary(self) -> str:
+        val = (self.cleaned_data.get("product_summary") or "").strip()
+        if not val:
+            raise forms.ValidationError("Thông tin sản phẩm/dịch vụ không được để trống.")
+        if len(val) > 5000:
+            raise forms.ValidationError("Thông tin sản phẩm không được vượt quá 5.000 ký tự.")
+        return val
+
+    def clean_target_audience(self) -> str:
+        val = (self.cleaned_data.get("target_audience") or "").strip()
+        if not val:
+            raise forms.ValidationError("Khách hàng mục tiêu không được để trống.")
+        if len(val) > 3000:
+            raise forms.ValidationError("Khách hàng mục tiêu không được vượt quá 3.000 ký tự.")
+        return val
+
+    def clean_tone_of_voice(self) -> str:
+        val = (self.cleaned_data.get("tone_of_voice") or "").strip()
+        if len(val) > 3000:
+            raise forms.ValidationError("Giọng văn không được vượt quá 3.000 ký tự.")
+        return val
+
+    def clean_avoid_guidelines(self) -> str:
+        val = (self.cleaned_data.get("avoid_guidelines") or "").strip()
+        if len(val) > 3000:
+            raise forms.ValidationError("Điều cần tránh không được vượt quá 3.000 ký tự.")
+        return val
+
+    def clean_allowed_claims(self) -> str:
+        val = (self.cleaned_data.get("allowed_claims") or "").strip()
+        if len(val) > 3000:
+            raise forms.ValidationError("Tuyên bố được phép không được vượt quá 3.000 ký tự.")
+        return val
+
+    def clean_source_urls(self) -> list[str]:
+        raw = self.cleaned_data.get("source_urls") or ""
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        if len(lines) > 10:
+            raise forms.ValidationError("Tối đa 10 URL nguồn tham khảo.")
+
+        import urllib.parse
+
+        cleaned = []
+        for u in lines:
+            parsed = urllib.parse.urlparse(u)
+            if parsed.scheme.lower() != "https":
+                raise forms.ValidationError(f"URL '{u}' không hợp lệ. Chỉ chấp nhận giao thức HTTPS.")
+            if not parsed.netloc:
+                raise forms.ValidationError(f"URL '{u}' không hợp lệ. Phải có tên miền đầy đủ.")
+            cleaned.append(u)
+        return cleaned
+
