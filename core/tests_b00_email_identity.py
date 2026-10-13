@@ -279,3 +279,244 @@ class MigrationBackfillHaltTests(TestCase):
 
 
 
+from unittest.mock import patch
+import threading
+from django.core import mail
+from django.db import transaction
+from django.test import TransactionTestCase
+
+
+class SingleUseAndInvalidationTokenTests(TestCase):
+    def setUp(self):
+        self.user = create_user_with_identity(
+            username="token_test_user",
+            email="tokentest@example.com",
+            password="InitialPassword123!",
+            send_email=False,
+        )
+
+    def test_token_single_use_cannot_be_replayed(self):
+        """Token xác minh chỉ được dùng một lần duy nhất. Tái sử dụng lập tức bị từ chối."""
+        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+        token = email_verification_token_generator.make_token(self.user)
+
+        # Lần 1: Thành công
+        success1, msg1, _ = verify_email_token(uidb64, token)
+        self.assertTrue(success1)
+        self.user.email_identity.refresh_from_db()
+        self.assertTrue(self.user.email_identity.is_verified)
+        initial_token_version = self.user.email_identity.token_version
+
+        # Lần 2 (Replay Attack): Dùng lại cùng token -> Phải bị từ chối
+        success2, msg2, _ = verify_email_token(uidb64, token)
+        self.assertFalse(success2)
+        self.assertEqual(msg2, "Địa chỉ email này đã được xác minh trước đó.")
+        self.assertEqual(self.user.email_identity.token_version, initial_token_version)
+
+    def test_token_invalidated_when_password_changes(self):
+        """Token mất hiệu lực ngay lập tức nếu mật khẩu tài khoản thay đổi."""
+        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+        token = email_verification_token_generator.make_token(self.user)
+
+        # Đổi mật khẩu
+        self.user.set_password("BrandNewPassword999!")
+        self.user.save()
+
+        success, msg, _ = verify_email_token(uidb64, token)
+        self.assertFalse(success)
+        self.assertIn("không hợp lệ hoặc đã hết hạn", msg)
+        self.user.email_identity.refresh_from_db()
+        self.assertFalse(self.user.email_identity.is_verified)
+
+    def test_token_invalidated_when_email_changes(self):
+        """Token của email cũ không bao giờ được phép xác minh email mới."""
+        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+        old_token = email_verification_token_generator.make_token(self.user)
+
+        # Người dùng đổi email sang địa chỉ khác
+        update_user_email(self.user, "brandnew@example.com", send_email=False)
+
+        success, msg, _ = verify_email_token(uidb64, old_token)
+        self.assertFalse(success)
+        self.user.email_identity.refresh_from_db()
+        self.assertFalse(self.user.email_identity.is_verified)
+
+    def test_token_invalidated_even_if_email_swapped_back_and_forth(self):
+        """Nếu đổi sang email khác rồi đổi lại email cũ, token ban đầu vẫn phải mất hiệu lực nhờ token_version."""
+        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+        original_token = email_verification_token_generator.make_token(self.user)
+
+        # Đổi sang email thứ 2
+        update_user_email(self.user, "temp@example.com", send_email=False)
+        # Đổi lại email ban đầu
+        update_user_email(self.user, "tokentest@example.com", send_email=False)
+
+        # Thử kích hoạt bằng token ban đầu
+        success, msg, _ = verify_email_token(uidb64, original_token)
+        self.assertFalse(success, "Token cũ phải bị vô hiệu hóa khi đổi email qua lại")
+        self.user.email_identity.refresh_from_db()
+        self.assertFalse(self.user.email_identity.is_verified)
+
+
+class TransactionAndEmailDeliveryResilienceTests(TestCase):
+    def test_on_commit_email_sending_does_not_fire_on_rollback(self):
+        """Email không được gửi ra ngoài nếu transaction bị rollback."""
+        mail.outbox.clear()
+        try:
+            with transaction.atomic():
+                create_user_with_identity(
+                    username="rollback_user",
+                    email="rollback@example.com",
+                    password="Password123!",
+                    send_email=True,
+                )
+                # Cố tình ném exception để ép transaction rollback
+                raise ValueError("Bắt buộc rollback mô phỏng lỗi hệ thống")
+        except ValueError:
+            pass
+
+        # Email tuyệt đối không được gửi
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertFalse(User.objects.filter(username="rollback_user").exists())
+
+    def test_smtp_failure_preserves_account_and_no_cooldown_penalty(self):
+        """Lỗi SMTP không làm mất tài khoản, và không phạt cooldown để người dùng thử lại ngay."""
+        with patch("apps.accounts.services.send_mail", side_effect=Exception("SMTP Server Down")):
+            user = create_user_with_identity(
+                username="smtp_fail_user",
+                email="smtp_fail@example.com",
+                password="Password123!",
+                send_email=False,
+            )
+            # Tài khoản và identity được lưu an toàn
+            self.assertTrue(User.objects.filter(username="smtp_fail_user").exists())
+            identity = user.email_identity
+            self.assertIsNone(identity.last_verification_sent_at)
+
+            # Thử gửi email bị lỗi SMTP
+            success, msg = send_verification_email(user)
+            self.assertFalse(success)
+            self.assertIn("Không thể gửi email xác minh", msg)
+
+            identity.refresh_from_db()
+            # Không cập nhật last_verification_sent_at khi gửi thất bại
+            self.assertIsNone(identity.last_verification_sent_at)
+
+            # Cho phép thử lại ngay lập tức (cooldown không bị chặn sai)
+            from apps.accounts.services import can_send_verification_email
+            allowed, remaining = can_send_verification_email(identity)
+            self.assertTrue(allowed)
+            self.assertEqual(remaining, 0)
+
+    def test_no_sensitive_token_or_url_in_warning_logs(self):
+        """Không ghi token hay toàn bộ verify_url vào hệ thống log."""
+        user = create_user_with_identity(
+            username="log_test_user",
+            email="logtest@example.com",
+            password="Password123!",
+            send_email=False,
+        )
+        uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
+        token = email_verification_token_generator.make_token(user)
+
+        with self.assertLogs("apps.accounts.services", level="WARNING") as captured_logs:
+            with patch("apps.accounts.services.send_mail", side_effect=RuntimeError("Connection refused")):
+                send_verification_email(user)
+
+        log_output = " ".join(captured_logs.output)
+        self.assertNotIn(token, log_output)
+        self.assertNotIn(f"/accounts/verify-email/{uidb64}/", log_output)
+
+
+class EmailSyncAcrossAllWritePathsTests(TestCase):
+    def test_email_sync_on_direct_user_save(self):
+        """Mọi đường ghi cập nhật User.email đều được đồng bộ AccountEmailIdentity và reset verified."""
+        user = create_user_with_identity(
+            username="sync_user",
+            email="original@example.com",
+            password="Password123!",
+            send_email=False,
+        )
+        user.email_identity.mark_as_verified()
+        self.assertTrue(user.email_identity.is_verified)
+        initial_token_version = user.email_identity.token_version
+
+        # Cập nhật email trực tiếp trên model User
+        user.email = "CHANGED_DIRECTLY@example.com"
+        user.save()
+
+        user.email_identity.refresh_from_db()
+        self.assertEqual(user.email_identity.normalized_email, "changed_directly@example.com")
+        self.assertFalse(user.email_identity.is_verified)
+        self.assertIsNone(user.email_identity.verified_at)
+        self.assertGreater(user.email_identity.token_version, initial_token_version)
+
+    def test_admin_save_model_sync_and_duplicate_prevention(self):
+        """Admin save_model đồng bộ email và ngăn chặn email trùng lặp với tài khoản khác."""
+        from django.contrib.admin.sites import AdminSite
+        from apps.accounts.admin import CustomUserAdmin
+
+        user1 = create_user_with_identity(
+            username="admin_user_1",
+            email="admin1@example.com",
+            password="Password123!",
+            send_email=False,
+        )
+        user2 = create_user_with_identity(
+            username="admin_user_2",
+            email="admin2@example.com",
+            password="Password123!",
+            send_email=False,
+        )
+        admin_obj = CustomUserAdmin(User, AdminSite())
+
+        # Thử đổi email user2 thành email user1 trong admin -> Phải bị chặn ValidationError
+        user2.email = "admin1@example.com"
+        with self.assertRaises(ValidationError):
+            admin_obj.save_model(request=None, obj=user2, form=None, change=True)
+
+
+class ConcurrentVerificationConcurrencyTests(TransactionTestCase):
+    def test_concurrent_verification_with_select_for_update(self):
+        """Kiểm tra xử lý cạnh tranh (race condition): hai request gửi cùng token đồng thời, chỉ một request được duyệt."""
+        user = create_user_with_identity(
+            username="race_user",
+            email="race@example.com",
+            password="Password123!",
+            send_email=False,
+        )
+        uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
+        token = email_verification_token_generator.make_token(user)
+
+        results = []
+        barrier = threading.Barrier(2)
+
+        def verify_task():
+            from django.db import connection
+            try:
+                barrier.wait(timeout=5)
+                success, msg, _ = verify_email_token(uidb64, token)
+                results.append((success, msg))
+            finally:
+                connection.close()
+
+        t1 = threading.Thread(target=verify_task)
+        t2 = threading.Thread(target=verify_task)
+
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        # Đúng 1 request thành công và 1 request thất bại
+        successes = [r for r in results if r[0] is True]
+        failures = [r for r in results if r[0] is False]
+
+        self.assertEqual(len(successes), 1, f"Chỉ đúng 1 request được thành công: {results}")
+        self.assertEqual(len(failures), 1, f"Request thứ hai phải thất bại: {results}")
+
+        user.email_identity.refresh_from_db()
+        self.assertTrue(user.email_identity.is_verified)
+        self.assertEqual(user.email_identity.token_version, 2)
+
+

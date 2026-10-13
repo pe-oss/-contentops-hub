@@ -76,29 +76,44 @@
   - Nếu chuỗi đăng nhập khớp đồng thời username của User A và email của User B (User A != User B), backend từ chối xác thực ngay lập tức (`return None`), ghi log cảnh báo và không bao giờ chọn tùy tiện tài khoản đầu tiên (`order_by("id").first()`).
   - Nếu có nhiều hơn 1 bản ghi khớp trong cùng một tiêu chí tìm kiếm, từ chối xác thực ngay lập tức.
 
-### 3.4. Service Layer, Token Verification & Rate Limiting
+### 3.4. Service Layer, Token Verification Dùng Một Lần & Rate Limiting
 - `apps/accounts/services.py`:
   - `normalize_email()`: chuẩn hóa email nhất quán.
-  - `create_user_with_identity()`: tạo User và AccountEmailIdentity trong một transaction atomic, kiểm tra unique ở CSDL, tự động gửi email xác minh.
-  - `update_user_email()`: cập nhật email trong transaction, kiểm tra unique, tự động reset `verified_at = None` và gửi lại email xác minh.
-  - `email_verification_token_generator`: mở rộng từ `PasswordResetTokenGenerator`, hash bao gồm user id, password, email và timestamp, tự động hết hạn và tự động vô hiệu hóa nếu mật khẩu hoặc email thay đổi.
-  - `send_verification_email()`: hỗ trợ rate limit cooldown 60 giây (`can_send_verification_email`).
-  - `verify_email_token()`: kiểm tra token an toàn và cập nhật `verified_at = timezone.now()`.
+  - `create_user_with_identity()`: tạo User và AccountEmailIdentity trong một transaction atomic, kiểm tra unique ở CSDL, chỉ gửi email xác minh sau khi transaction commit thành công (`transaction.on_commit`).
+  - `update_user_email()`: cập nhật email trong transaction, khóa hàng bằng `select_for_update()`, kiểm tra unique ở CSDL, tự động reset `verified_at = None`, tăng `token_version += 1` để hủy toàn bộ token cũ, và chỉ gửi email xác minh sau khi commit (`transaction.on_commit`).
+  - `EmailVerificationTokenGenerator`: mở rộng từ `PasswordResetTokenGenerator`, hash bao gồm user id, password, email, `token_version` và `verified_at`. Bất kỳ thay đổi nào về mật khẩu, email, hoặc `token_version` đều làm mất hiệu lực token cũ.
+  - `send_verification_email()`: hỗ trợ rate limit cooldown 60 giây (`can_send_verification_email`). Nếu gửi email thất bại do lỗi SMTP: giữ nguyên tài khoản và identity trong DB, không ghi nhận thời điểm gửi (`last_verification_sent_at`) để người dùng không bị phạt cooldown oan và có thể thử lại ngay; tuyệt đối không ghi token hay URL xác minh vào log.
+  - `verify_email_token()`: khóa hàng bằng `select_for_update()` chống tranh chấp đồng thời (race condition); từ chối nếu email đã xác minh hoặc email không khớp tài khoản; sau khi xác minh thành công lập tức cập nhật `verified_at` và tăng `token_version += 1`, bảo đảm token là **dùng một lần duy nhất (single-use)**, không thể bị tái sử dụng (replay attack); tuyệt đối không log token hay URL xác minh.
 
-### 3.5. Web Views & Giao diện Dashboard
+### 3.5. Đồng bộ Email Ở Mọi Đường Ghi & Quản trị Admin
+- `apps/accounts/signals.py`: Lắng nghe tín hiệu `post_save` trên `User` để đồng bộ tự động `AccountEmailIdentity`, reset `verified_at` và tăng `token_version` khi đổi email trực tiếp hoặc qua script, loại bỏ hoàn toàn nguy cơ lệch dữ liệu giữa `User.email` và `AccountEmailIdentity`.
+- `apps/accounts/admin.py`: Tùy biến `CustomUserAdmin.save_model` bọc transaction kiểm tra trùng email trên toàn hệ thống trước khi lưu, đồng bộ an toàn `AccountEmailIdentity`, hiển thị `token_version` và cấm sửa đổi tùy tiện.
+
+### 3.6. Web Views & Giao diện Dashboard
 - Thêm routes `/auth/verify-email/<uidb64>/<token>/` và `/auth/resend-verification/`.
-- Cập nhật `CustomUserCreationForm` để gọi transaction atomic tạo User và Identity.
+- Cập nhật `CustomUserCreationForm` để gọi transaction atomic tạo User và Identity, đăng ký gửi email xác minh qua `transaction.on_commit`.
 - Cập nhật `dashboard.html`:
   - Hiển thị badge trạng thái "Đã xác minh" (xanh) hoặc "Chưa xác minh" (đỏ).
   - Hiển thị banner nhắc nhở kèm nút bấm gửi lại email xác minh nếu tài khoản chưa xác minh email.
 
 ---
 
-## 4. Kết quả Kiểm thử (Validation)
+## 4. Kết quả Kiểm thử & Cách ly Database (Validation)
 
-- **PostgreSQL Database:** Đã kết nối và xác nhận trực tiếp trên PostgreSQL 17.11 (Supabase Session Pooler).
-- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`) áp dụng thành công 100% trên PostgreSQL.
-- **Toàn bộ Bộ kiểm thử tự động (31/31 tests Passed):**
+- **PostgreSQL Database & Cách ly Kiểm thử (Test Database Isolation):**
+  - Đã kết nối và xác nhận trực tiếp trên PostgreSQL 17.11 (Supabase Session Pooler).
+  - **Chứng minh cách ly độc lập:** Cấu hình rõ ràng `DATABASES["default"]["TEST"]` trong `core/settings.py` (hỗ trợ `TEST_DATABASE_URL` và `TEST_DATABASE_NAME`). CSDL ứng dụng thực tế (`postgres`) và CSDL test runner (`test_postgres`) là hai database riêng biệt trong hệ thống PostgreSQL (đã kiểm chứng qua truy vấn kích thước catalog: `postgres` 11 MB, `test_postgres` ~8 MB; bảng người dùng ứng dụng trên `postgres` hoàn toàn không bị ảnh hưởng bởi test).
+- **Django Migrations:** Toàn bộ migrations (`accounts.0001_initial`, `accounts.0002_backfill_email_identities`, `accounts.0003_accountemailidentity_token_version`) áp dụng thành công 100% trên PostgreSQL.
+- **Toàn bộ Bộ kiểm thử tự động (41/41 tests Passed):**
   - **15 tests** `core/tests_b00_runtime.py`: Pass 100% (fail-fast, billing disabled, auth cơ bản, staticfiles).
-  - **16 tests** `core/tests_b00_email_identity.py`: Pass 100% (chuẩn hóa email, ràng buộc unique DB, reset verification khi đổi email, chặn đăng nhập mơ hồ giữa 2 user khác nhau, chu kỳ tạo/xác minh token an toàn, rate limit cooldown 60s, migration backfill dừng khi gặp duplicate/invalid email, luồng giao diện đăng ký & xác minh).
+  - **26 tests** `core/tests_b00_email_identity.py`: Pass 100%:
+    - Chuẩn hóa email, ràng buộc unique DB, reset verification khi đổi email.
+    - Chặn đăng nhập mơ hồ giữa 2 user khác nhau (Ambiguous Login Prevention).
+    - Chu kỳ tạo & xác minh token; bảo đảm token dùng một lần duy nhất (Replay Attack Rejected).
+    - Token mất hiệu lực khi đổi mật khẩu, đổi email, hoặc đổi qua lại email cũ (`token_version`).
+    - Gửi email qua `transaction.on_commit` không phát tán khi rollback.
+    - Chịu lỗi SMTP: bảo toàn tài khoản, không phạt cooldown oan, không ghi lộ token/URL vào logs.
+    - Đồng bộ email ở mọi đường ghi (`post_save` signal, Django Admin `save_model`).
+    - Kiểm thử cạnh tranh đồng thời đa luồng (`TransactionTestCase` với `threading.Barrier` và `select_for_update()`).
+    - Migration backfill dừng khi gặp duplicate/invalid email; luồng giao diện đăng ký & xác minh.
 

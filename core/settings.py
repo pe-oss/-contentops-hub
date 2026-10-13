@@ -134,6 +134,21 @@ else:
         else dj_database_url.parse(f"sqlite:///{BASE_DIR / 'db.sqlite3'}", conn_max_age=600)
     }
 
+# Cấu hình test database tách biệt, cách ly hoàn toàn khỏi CSDL ứng dụng (B00.2 gate)
+test_database_url = os.getenv("TEST_DATABASE_URL", "").strip()
+if test_database_url:
+    DATABASES["default"]["TEST"] = dj_database_url.parse(test_database_url)
+else:
+    test_db_name = os.getenv("TEST_DATABASE_NAME", "").strip()
+    if not test_db_name:
+        if database_url and not database_url.startswith("sqlite"):
+            test_db_name = "test_postgres"
+        else:
+            test_db_name = ":memory:"
+    DATABASES["default"]["TEST"] = {
+        "NAME": test_db_name,
+    }
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

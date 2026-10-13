@@ -18,7 +18,10 @@ class RegisterView(CreateView):
     def form_valid(self, form):
         response = super().form_valid(form)
         login(self.request, self.object)
-        messages.success(self.request, "Tạo tài khoản thành công! Một email xác minh đã được gửi đến hộp thư của bạn.")
+        messages.success(
+            self.request,
+            "Tạo tài khoản thành công! Vui lòng kiểm tra hộp thư để xác minh tài khoản, hoặc bấm 'Gửi lại mã xác minh' trên Dashboard nếu chưa nhận được.",
+        )
         return response
 
     def dispatch(self, request, *args, **kwargs):

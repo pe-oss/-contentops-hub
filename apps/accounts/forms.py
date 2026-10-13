@@ -81,12 +81,12 @@ class CustomUserCreationForm(UserCreationForm):
         user.email = norm_email
         if commit:
             user.save()
-            identity, _ = AccountEmailIdentity.objects.get_or_create(
+            AccountEmailIdentity.objects.get_or_create(
                 user=user,
-                defaults={"normalized_email": norm_email, "verified_at": None},
+                defaults={"normalized_email": norm_email, "verified_at": None, "token_version": 1},
             )
-            # Gửi email xác minh
-            send_verification_email(user)
+            # Chỉ gửi email sau khi transaction đã commit thành công
+            transaction.on_commit(lambda: send_verification_email(user))
         return user
 
 

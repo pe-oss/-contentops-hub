@@ -27,6 +27,10 @@ class AccountEmailIdentity(models.Model):
         blank=True,
         verbose_name="Thời điểm gửi mã xác minh gần nhất",
     )
+    token_version = models.PositiveIntegerField(
+        default=1,
+        verbose_name="Phiên bản token xác minh",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
