@@ -516,3 +516,53 @@ class ContentApprovalAndLifecycleTests(TestCase):
         # Gói COMPLETED tự động chuyển về ACTIVE
         self.pkg.refresh_from_db()
         self.assertEqual(self.pkg.status, PackageStatus.ACTIVE)
+
+    def test_database_constraint_rejects_concurrent_active_approvals(self):
+        """
+        Bảo đảm bất biến mức cơ sở dữ liệu (PostgreSQL partial unique index):
+        Mỗi bài chỉ có tối đa một ContentApproval có hiệu lực (invalidated_at__isnull=True).
+        Nếu cố tình tạo 2 bản ghi active cùng trỏ tới 1 ContentItem, DB phải ném IntegrityError.
+        """
+        from django.db import IntegrityError, transaction
+
+        v1, item_review = self._advance_item_to_owner_review()
+
+        # Tạo approval active thứ 1 hợp lệ
+        app1 = ContentApproval.objects.create(
+            workspace=self.workspace,
+            item=item_review,
+            version=v1,
+            approved_by=self.owner,
+            invalidated_at=None,
+        )
+        self.assertTrue(app1.is_active)
+
+        # Cố gắng tạo approval active thứ 2 trên cùng item trong transaction
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ContentApproval.objects.create(
+                    workspace=self.workspace,
+                    item=item_review,
+                    version=v1,
+                    approved_by=self.owner,
+                    invalidated_at=None,
+                )
+
+        # Nếu approval thứ 1 bị vô hiệu hóa (invalidated_at đã set), tạo approval thứ 2 phải thành công
+        from django.utils import timezone
+        app1.invalidated_at = timezone.now()
+        app1.invalidation_reason = "Vô hiệu hóa bản ghi 1"
+        app1.save()
+
+        app2 = ContentApproval.objects.create(
+            workspace=self.workspace,
+            item=item_review,
+            version=v1,
+            approved_by=self.owner,
+            invalidated_at=None,
+        )
+        self.assertIsNotNone(app2.id)
+        self.assertTrue(app2.is_active)
+        # Tổng số approval trên item là 2, nhưng chỉ có đúng 1 bản ghi active
+        self.assertEqual(ContentApproval.objects.filter(item=item_review).count(), 2)
+        self.assertEqual(ContentApproval.objects.filter(item=item_review, invalidated_at__isnull=True).count(), 1)

@@ -25,6 +25,27 @@ class WorkspaceCreateForm(forms.Form):
         ),
         help_text="Từ 1 đến 100 ký tự. Không được để trống hoặc chỉ có khoảng trắng.",
     )
+    timezone = forms.ChoiceField(
+        choices=COMMON_TIMEZONES,
+        initial="Asia/Ho_Chi_Minh",
+        label="Múi giờ hiển thị",
+        widget=forms.Select(attrs={"class": "form-control"}),
+        help_text="Mặc định là Asia/Ho_Chi_Minh theo chuẩn nghiệp vụ.",
+    )
+
+    def clean_name(self) -> str:
+        name = (self.cleaned_data.get("name") or "").strip()
+        if not name:
+            raise forms.ValidationError("Tên workspace không được để trống hoặc chỉ chứa khoảng trắng.")
+        if len(name) > 100:
+            raise forms.ValidationError("Tên workspace không được vượt quá 100 ký tự.")
+        return name
+
+    def clean_timezone(self) -> str:
+        tz = (self.cleaned_data.get("timezone") or "").strip()
+        if not tz or tz not in zoneinfo.available_timezones():
+            raise forms.ValidationError("Múi giờ không hợp lệ theo chuẩn IANA.")
+        return tz
 
 
 class OwnerApproveItemForm(forms.Form):
@@ -109,27 +130,6 @@ class BlockContentItemForm(forms.Form):
         widget=forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Nhập nguyên nhân chặn hoặc cách đã giải quyết..."}),
     )
     expected_row_version = forms.IntegerField(required=False, widget=forms.HiddenInput())
-    timezone = forms.ChoiceField(
-        choices=COMMON_TIMEZONES,
-        initial="Asia/Ho_Chi_Minh",
-        label="Múi giờ hiển thị",
-        widget=forms.Select(attrs={"class": "form-control"}),
-        help_text="Mặc định là Asia/Ho_Chi_Minh theo chuẩn nghiệp vụ.",
-    )
-
-    def clean_name(self) -> str:
-        name = (self.cleaned_data.get("name") or "").strip()
-        if not name:
-            raise forms.ValidationError("Tên workspace không được để trống hoặc chỉ chứa khoảng trắng.")
-        if len(name) > 100:
-            raise forms.ValidationError("Tên workspace không được vượt quá 100 ký tự.")
-        return name
-
-    def clean_timezone(self) -> str:
-        tz = (self.cleaned_data.get("timezone") or "").strip()
-        if not tz or tz not in zoneinfo.available_timezones():
-            raise forms.ValidationError("Múi giờ không hợp lệ theo chuẩn IANA.")
-        return tz
 
 
 class WorkspaceUpdateForm(forms.Form):

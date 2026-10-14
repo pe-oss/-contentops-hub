@@ -1083,6 +1083,13 @@ class ContentApproval(models.Model):
             models.Index(fields=["item", "invalidated_at"], name="idx_appr_item_inval"),
             models.Index(fields=["workspace", "approved_at"], name="idx_appr_ws_approved"),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item"],
+                condition=models.Q(invalidated_at__isnull=True),
+                name="unique_active_content_approval_per_item",
+            ),
+        ]
 
     @property
     def is_active(self) -> bool:
