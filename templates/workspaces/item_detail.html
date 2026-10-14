@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+
+{% block title %}{{ item.title }} — Tác nghiệp nội dung{% endblock %}
+
+{% block content %}
+<section class="dashboard-page" style="max-width: 960px; margin: 0 auto;">
+  <div class="dashboard-header" style="margin-bottom: 20px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+        <p class="eyebrow" style="margin: 0;">
+          <a href="{% url 'workspaces:package_detail' workspace.id package.id %}">← {{ package.name }}</a>
+        </p>
+        <span class="badge" style="font-size: 11px;">{{ item.get_state_display }}</span>
+        {% if item.is_blocked %}
+          <span class="badge" style="background: #e74c3c; color: white; font-size: 11px;">⚠️ Đang bị chặn</span>
+        {% endif %}
+      </div>
+      <h1 style="margin-top: 4px; margin-bottom: 8px;">{{ item.title }}</h1>
+      <p class="muted" style="margin: 0;">
+        Kênh: <strong>{{ package.get_channel_display }}</strong> &bull;
+        Phiên bản dữ liệu (Row version): <strong>#{{ item.row_version }}</strong>
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <a href="{% url 'workspaces:my_tasks' workspace.id %}" class="btn">📋 Việc của tôi</a>
+      {% if is_owner %}
+        <a href="{% url 'workspaces:item_edit' workspace.id package.id item.id %}" class="btn">⚙️ Sửa cấu hình bài</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if conflict_error %}
+    <div class="alert" style="background: #fef2f2; border: 1px solid #ef4444; color: #b91c1c; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
+      <strong>⚠️ Xung đột phiên bản dữ liệu (409):</strong> {{ conflict_error }}
+    </div>
+  {% endif %}
+
+  {% if item.is_blocked %}
+    <div class="alert" style="background: #fff7ed; border: 1px solid #f97316; color: #c2410c; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
+      <strong>⚠️ Bài viết đang bị chặn:</strong> {{ item.blocked_reason }}
+      {% if item.blocked_by %}<br><small>Báo bởi: {{ item.blocked_by.username }} lúc {{ item.blocked_at|date:"H:i d/m/Y" }}</small>{% endif %}
+    </div>
+  {% endif %}
+
+  <!-- Brief Box with One-Click Copy -->
+  <div class="card" style="margin-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+      <h3 style="margin: 0;">📋 Brief nội dung &amp; Hướng dẫn thương hiệu</h3>
+      <button type="button" class="btn" style="font-size: 12px; padding: 4px 10px;" onclick="copyBriefText()">
+        📋 Sao chép Brief sang AI riêng
+      </button>
+    </div>
+    <p style="margin: 0 0 10px 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; background: #fafafa; padding: 10px; border-radius: 4px; border: 1px solid var(--border);"><strong>Yêu cầu bài:</strong> {{ item.brief }}
+{% if item.cta %}<br><strong>CTA:</strong> {{ item.cta }}{% endif %}</p>
+    <textarea id="briefCopySource" style="display: none;">{{ brief_copy_text }}</textarea>
+    <script>
+      function copyBriefText() {
+        var copyText = document.getElementById("briefCopySource");
+        navigator.clipboard.writeText(copyText.value).then(function() {
+          alert("Đã sao chép toàn bộ Brief và hướng dẫn thương hiệu! Bạn có thể dán trực tiếp vào ChatGPT / Claude / Gemini.");
+        }, function() {
+          copyText.style.display = "block";
+          copyText.select();
+          document.execCommand("copy");
+          copyText.style.display = "none";
+          alert("Đã sao chép Brief!");
+        });
+      }
+    </script>
+  </div>
+
+  <!-- Tasks & Assignments Info -->
+  <div class="card" style="margin-bottom: 24px;">
+    <h4 style="margin: 0 0 12px 0;">Tiến độ các nhiệm vụ</h4>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; font-size: 13px;">
+      <div style="background: #f8fafc; padding: 10px; border-radius: 4px; border: 1px solid #e2e8f0;">
+        <strong>✍️ Viết bài:</strong> {{ item.writer_membership.user.get_full_name|default:item.writer_membership.user.username }}<br>
+        <span class="muted">Hạn: {{ item.writing_deadline|date:"H:i d/m/Y" }}</span><br>
+        Trạng thái: 
+        {% for t in tasks %}{% if t.role == "WRITE" %}
+          <span class="badge" style="font-size: 11px;">{{ t.get_status_display }}</span>
+        {% endif %}{% endfor %}
+      </div>
+      <div style="background: #f8fafc; padding: 10px; border-radius: 4px; border: 1px solid #e2e8f0;">
+        <strong>🔍 Biên tập:</strong> {{ item.editor_membership.user.get_full_name|default:item.editor_membership.user.username }}<br>
+        <span class="muted">Hạn: {{ item.editing_deadline|date:"H:i d/m/Y" }}</span><br>
+        Trạng thái: 
+        {% for t in tasks %}{% if t.role == "EDIT" %}
+          <span class="badge" style="font-size: 11px;">{{ t.get_status_display }}</span>
+        {% endif %}{% endfor %}
+      </div>
+      <div style="background: #f8fafc; padding: 10px; border-radius: 4px; border: 1px solid #e2e8f0;">
+        <strong>📢 Xuất bản:</strong> {{ item.publisher_membership.user.get_full_name|default:item.publisher_membership.user.username }}<br>
+        <span class="muted">Đăng: {{ item.planned_publish_at|date:"H:i d/m/Y" }}</span><br>
+        Trạng thái: 
+        {% for t in tasks %}{% if t.role == "PUBLISH" %}
+          <span class="badge" style="font-size: 11px;">{{ t.get_status_display }}</span>
+        {% endif %}{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- WORKFLOW INTERACTION AREA (B05) -->
+  <div class="card" style="margin-bottom: 24px; border-top: 3px solid var(--primary);">
+    <h3 style="margin-top: 0; margin-bottom: 16px;">Tác nghiệp theo công đoạn</h3>
+
+    <!-- CÔNG ĐOẠN 1: VIẾT BÀI (TODO / WRITING) -->
+    {% if item.state == "TODO" or item.state == "WRITING" %}
+      {% if can_write %}
+        {% if item.state == "TODO" %}
+          <div style="background: #eff6ff; padding: 16px; border-radius: 6px; margin-bottom: 16px;">
+            <p style="margin: 0 0 10px 0;">Nhiệm vụ viết bài đã sẵn sàng. Hãy bấm nhận việc để bắt đầu thực hiện:</p>
+            <form method="post" action="{% url 'workspaces:item_start_writing' workspace.id package.id item.id %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-primary">🚀 Nhận việc &amp; Bắt đầu viết</button>
+            </form>
+          </div>
+        {% endif %}
+
+        <div>
+          <h4 style="margin: 0 0 8px 0;">Soạn thảo nội dung (Bản nháp &amp; Nộp biên tập)</h4>
+          
+          <!-- Form Lưu nháp -->
+          <form method="post" action="{% url 'workspaces:item_save_draft' workspace.id package.id item.id %}" style="margin-bottom: 20px;">
+            {% csrf_token %}
+            {{ draft_form.expected_row_version }}
+            {% if draft_form.non_field_errors %}
+              <div class="alert" style="color: #b91c1c; margin-bottom: 10px;">{{ draft_form.non_field_errors }}</div>
+            {% endif %}
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label for="{{ draft_form.text.id_for_label }}" style="display: block; font-weight: 600; margin-bottom: 4px;">{{ draft_form.text.label }}</label>
+              {{ draft_form.text }}
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label for="{{ draft_form.reference_urls_text.id_for_label }}" style="display: block; font-weight: 600; margin-bottom: 4px;">{{ draft_form.reference_urls_text.label }}</label>
+              {{ draft_form.reference_urls_text }}
+            </div>
+            <button type="submit" class="btn">💾 Lưu bản nháp (Giữ nội dung)</button>
+          </form>
+
+          <!-- Form Nộp biên tập -->
+          {% if not item.is_blocked %}
+            <div style="border-top: 1px dashed var(--border); padding-top: 16px;">
+              <h4 style="margin: 0 0 8px 0;">Nộp bài hoàn tất cho Biên tập viên</h4>
+              <form method="post" action="{% url 'workspaces:item_submit_version' workspace.id package.id item.id %}">
+                {% csrf_token %}
+                {{ submit_form.expected_row_version }}
+                {{ submit_form.idempotency_key }}
+                {% if submit_form.non_field_errors %}
+                  <div class="alert" style="color: #b91c1c; margin-bottom: 10px;">{{ submit_form.non_field_errors }}</div>
+                {% endif %}
+                <div class="form-group" style="margin-bottom: 12px;">
+                  <label for="{{ submit_form.text.id_for_label }}" style="display: block; font-weight: 600; margin-bottom: 4px;">Nội dung nộp hoàn chỉnh *</label>
+                  {{ submit_form.text }}
+                  {% if submit_form.text.errors %}<small style="color: #dc2626;">{{ submit_form.text.errors }}</small>{% endif %}
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                  <label for="{{ submit_form.reference_urls_text.id_for_label }}" style="display: block; font-weight: 600; margin-bottom: 4px;">{{ submit_form.reference_urls_text.label }}</label>
+                  {{ submit_form.reference_urls_text }}
+                  {% if submit_form.reference_urls_text.errors %}<small style="color: #dc2626;">{{ submit_form.reference_urls_text.errors }}</small>{% endif %}
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                  <label for="{{ submit_form.source.id_for_label }}" style="display: block; font-weight: 600; margin-bottom: 4px;">{{ submit_form.source.label }}</label>
+                  {{ submit_form.source }}
+                </div>
+                <button type="submit" class="btn btn-primary" onclick="return confirm('Xác nhận nộp bài hoàn chỉnh cho Biên tập viên?');">
+                  📤 Nộp bài cho Biên tập
+                </button>
+              </form>
+            </div>
+          {% else %}
+            <p class="muted" style="color: #c2410c;">Bài viết đang bị chặn. Bạn vẫn có thể lưu nháp nhưng chưa thể nộp bài.</p>
+          {% endif %}
+        </div>
+      {% else %}
+        <p class="muted">Bài viết đang ở công đoạn Viết bài bởi <strong>{{ item.writer_membership.user.username }}</strong>.</p>
+      {% endif %}
+    {% endif %}
+
+    <!-- CÔNG ĐOẠN 2: BIÊN TẬP (EDITING) -->
+    {% if item.state == "EDITING" %}
+      {% if can_edit %}
+        <div style="display: flex; flex-direction: column; gap: 24px;">
+          <div style="background: #f0fdf4; padding: 12px 16px; border-radius: 6px; border: 1px solid #bbf7d0;">
+            <strong>Phiên bản đang xét: v{{ item.latest_version.version_no }}</strong> (Tác giả: {{ item.latest_version.author_membership.user.username }} lúc {{ item.latest_version.created_at|date:"H:i d/m/Y" }})
+          </div>
+
+          <!-- Thao tác 1: Tạo phiên bản chỉnh sửa -->
+          <div style="border: 1px solid var(--border); padding: 16px; border-radius: 6px;">
+            <h4 style="margin: 0 0 8px 0;">1. Chỉnh sửa nội dung &amp; Tạo phiên bản mới</h4>
+            <form method="post" action="{% url 'workspaces:item_editor_version' workspace.id package.id item.id %}">
+              {% csrf_token %}
+              {{ editor_form.expected_row_version }}
+              {% if editor_form.non_field_errors %}<div class="alert" style="color: #b91c1c;">{{ editor_form.non_field_errors }}</div>{% endif %}
+              <div class="form-group" style="margin-bottom: 12px;">
+                {{ editor_form.text }}
+                {% if editor_form.text.errors %}<small style="color: #dc2626;">{{ editor_form.text.errors }}</small>{% endif %}
+              </div>
+              <button type="submit" class="btn">✏️ Lưu thành phiên bản chỉnh sửa mới</button>
+            </form>
+          </div>
+
+          <!-- Thao tác 2: Trả về yêu cầu người viết sửa -->
+          <div style="border: 1px solid var(--border); padding: 16px; border-radius: 6px; background: #fffbeb;">
+            <h4 style="margin: 0 0 8px 0;">2. Yêu cầu người viết sửa lại (Trả bước)</h4>
+            <form method="post" action="{% url 'workspaces:item_request_changes' workspace.id package.id item.id %}">
+              {% csrf_token %}
+              {{ request_changes_form.expected_row_version }}
+              {% if request_changes_form.non_field_errors %}<div class="alert" style="color: #b91c1c;">{{ request_changes_form.non_field_errors }}</div>{% endif %}
+              <div class="form-group" style="margin-bottom: 12px;">
+                {{ request_changes_form.reason }}
+                {% if request_changes_form.reason.errors %}<small style="color: #dc2626;">{{ request_changes_form.reason.errors }}</small>{% endif %}
+              </div>
+              <button type="submit" class="btn" style="color: #b45309;" onclick="return confirm('Xác nhận trả bài về cho người viết sửa lại?');">
+                ↩️ Trả về cho Người viết sửa
+              </button>
+            </form>
+          </div>
+
+          <!-- Thao tác 3: Checklist & Chuyển Chủ duyệt -->
+          <div style="border: 1px solid var(--border); padding: 16px; border-radius: 6px; background: #f8fafc;">
+            <h4 style="margin: 0 0 8px 0;">3. Đánh dấu Checklist &amp; Chuyển Chủ duyệt</h4>
+            <p class="muted" style="margin-bottom: 12px; font-size: 13px;">Bắt buộc hoàn tất cả 4 tiêu chí kiểm tra chất lượng trước khi nộp Chủ workspace.</p>
+            <form method="post" action="{% url 'workspaces:item_submit_review' workspace.id package.id item.id %}">
+              {% csrf_token %}
+              {{ submit_review_form.expected_row_version }}
+              {{ submit_review_form.idempotency_key }}
+              {% if submit_review_form.non_field_errors %}<div class="alert" style="color: #b91c1c;">{{ submit_review_form.non_field_errors }}</div>{% endif %}
+              <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; font-size: 14px;">
+                <label><input type="checkbox" name="brief_compliance" value="1" required> 1. Đúng brief, mục tiêu chiến dịch và yêu cầu bài viết</label>
+                <label><input type="checkbox" name="factual_accuracy" value="1" required> 2. Đảm bảo độ chính xác của số liệu và tài liệu cung cấp</label>
+                <label><input type="checkbox" name="voice_tone" value="1" required> 3. Đúng định vị, giọng văn thương hiệu và không vi phạm điều tránh</label>
+                <label><input type="checkbox" name="cta_verified" value="1" required> 4. Kêu gọi hành động (CTA) đã kiểm tra và phù hợp</label>
+              </div>
+              <button type="submit" class="btn btn-primary" onclick="return confirm('Xác nhận chuyển bài viết cho Chủ workspace phê duyệt?');">
+                ✅ Nộp Chủ duyệt (Chuyển OWNER_REVIEW)
+              </button>
+            </form>
+          </div>
+        </div>
+      {% else %}
+        <p class="muted">Bài viết đang ở công đoạn Biên tập bởi <strong>{{ item.editor_membership.user.username }}</strong>.</p>
+      {% endif %}
+    {% endif %}
+
+    <!-- CÔNG ĐOẠN 3: CHỦ DUYỆT (OWNER_REVIEW) & CÁC TRẠNG THÁI TIẾP THEO -->
+    {% if item.state == "OWNER_REVIEW" %}
+      <div style="background: #faf5ff; border: 1px solid #d8b4fe; padding: 16px; border-radius: 6px;">
+        <h4 style="margin: 0 0 8px 0; color: #6b21a8;">Đang chờ Chủ workspace phê duyệt (OWNER_REVIEW)</h4>
+        <p style="margin: 0; font-size: 14px;">Biên tập viên đã hoàn thành checklist và chuyển bài cho Chủ xem xét (Công đoạn B06).</p>
+      </div>
+    {% elif item.state == "READY_TO_PUBLISH" %}
+      <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 16px; border-radius: 6px;">
+        <h4 style="margin: 0 0 8px 0; color: #166534;">Sẵn sàng đăng bài (READY_TO_PUBLISH)</h4>
+        <p style="margin: 0; font-size: 14px;">Chủ workspace đã phê duyệt nội dung. Người xuất bản chuẩn bị đăng lên kênh (Công đoạn B07).</p>
+      </div>
+    {% elif item.state == "PUBLISHED" %}
+      <div style="background: #ecfdf5; border: 1px solid #10b981; padding: 16px; border-radius: 6px;">
+        <h4 style="margin: 0 0 8px 0; color: #047857;">Bài viết đã xuất bản (PUBLISHED)</h4>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- LỊCH SỬ CÁC PHIÊN BẢN (CONTENT VERSIONS) -->
+  <div class="card" style="margin-bottom: 24px;">
+    <h3 style="margin-top: 0; margin-bottom: 16px;">Lịch sử các phiên bản nội dung ({{ versions.count }})</h3>
+    {% if versions %}
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        {% for v in versions %}
+          <div style="border: 1px solid var(--border); border-radius: 6px; padding: 14px; background: {% if forloop.first %}#fcfdfd{% else %}#fafafa{% endif %};">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <div>
+                <strong>Phiên bản v{{ v.version_no }}</strong>
+                {% if forloop.first %}<span class="badge" style="font-size: 10px; margin-left: 6px;">Mới nhất</span>{% endif %}
+                <span class="muted" style="font-size: 13px; margin-left: 8px;">
+                  Tạo bởi <strong>{{ v.author_membership.user.username }}</strong> &bull; {{ v.created_at|date:"H:i d/m/Y" }} &bull; Nguồn: {{ v.get_source_display }}
+                </span>
+              </div>
+            </div>
+            <div style="font-size: 14px; line-height: 1.6; white-space: pre-wrap; background: white; padding: 12px; border-radius: 4px; border: 1px solid #e5e7eb;">{{ v.text }}</div>
+            {% if v.reference_urls %}
+              <div style="margin-top: 8px; font-size: 12px;">
+                <strong>Nguồn tham khảo:</strong>
+                <ul style="margin: 4px 0 0 16px; padding: 0;">
+                  {% for url in v.reference_urls %}
+                    <li><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a></li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Chưa có phiên bản nào được nộp.</p>
+    {% endif %}
+  </div>
+
+  <!-- LỊCH SỬ QUYẾT ĐỊNH & CHECKLIST (REVIEW DECISIONS) -->
+  {% if decisions %}
+    <div class="card">
+      <h3 style="margin-top: 0; margin-bottom: 16px;">Lịch sử quyết định biên tập</h3>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        {% for d in decisions %}
+          <div style="border-left: 3px solid {% if d.decision == 'REQUEST_CHANGES' %}#f59e0b{% else %}#10b981{% endif %}; padding: 8px 12px; background: #fafafa;">
+            <div style="display: flex; justify-content: space-between;">
+              <strong>{{ d.get_decision_display }}</strong>
+              <span class="muted" style="font-size: 12px;">{{ d.created_at|date:"H:i d/m/Y" }}</span>
+            </div>
+            <p class="muted" style="margin: 4px 0; font-size: 13px;">Bởi: {{ d.actor_membership.user.username }}</p>
+            {% if d.reason %}
+              <p style="margin: 4px 0; font-size: 13px;"><strong>Lý do:</strong> {{ d.reason }}</p>
+            {% endif %}
+            {% if d.checklist %}
+              <div style="font-size: 12px; color: #166534; margin-top: 4px;">
+                ✓ Đã hoàn tất 4 mục kiểm tra checklist
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

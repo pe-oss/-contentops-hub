@@ -652,11 +652,17 @@ class InvitationAcceptView(View):
                 },
             )
 
-from .forms import ContentItemForm, PackageForm
-from .models import PackageStatus
+from .forms import (
+    ContentDraftForm, ContentItemForm, ContentSubmitForm,
+    EditorVersionForm, PackageForm, RequestChangesForm, SubmitReviewForm,
+)
+from .models import ContentItemState, PackageStatus, TaskRole, TaskStatus
 from .selectors import (
+    get_item_decisions,
     get_item_for_workspace,
     get_item_tasks,
+    get_item_versions,
+    get_my_tasks_for_workspace,
     get_package_for_workspace,
     get_package_items,
     get_workspace_packages,
@@ -665,11 +671,363 @@ from .services import (
     add_content_item,
     approve_plan,
     create_package,
+    create_editor_version,
+    format_brief_for_copy,
+    request_changes_decision,
+    save_draft_content,
+    start_writing_task,
+    submit_content_version,
+    submit_for_owner_review,
     update_content_item,
     update_package,
 )
 
 
+def _render_item_detail(
+    request,
+    workspace,
+    membership,
+    package,
+    item,
+    context_extra=None,
+    status=200,
+):
+    """Helper render màn hình chi tiết bài viết tác nghiệp (UI05)."""
+    versions = get_item_versions(item)
+    decisions = get_item_decisions(item)
+    tasks = get_item_tasks(item)
+    is_owner = (membership.access_role == AccessRole.OWNER)
+    is_writer = (item.writer_membership_id == membership.id)
+    is_editor = (item.editor_membership_id == membership.id)
+    can_write = is_owner or is_writer
+    can_edit = is_owner or is_editor
+    brief_copy_text = format_brief_for_copy(item)
+
+    default_urls_text = "\n".join(item.draft_reference_urls) if item.draft_reference_urls else ""
+    ctx = {
+        "workspace": workspace,
+        "membership": membership,
+        "package": package,
+        "item": item,
+        "versions": versions,
+        "decisions": decisions,
+        "tasks": tasks,
+        "is_owner": is_owner,
+        "is_writer": is_writer,
+        "is_editor": is_editor,
+        "can_write": can_write,
+        "can_edit": can_edit,
+        "brief_copy_text": brief_copy_text,
+        "draft_form": ContentDraftForm(initial={
+            "text": item.draft_text,
+            "reference_urls_text": default_urls_text,
+            "expected_row_version": item.row_version,
+        }),
+        "submit_form": ContentSubmitForm(initial={
+            "text": item.draft_text,
+            "reference_urls_text": default_urls_text,
+            "expected_row_version": item.row_version,
+            "idempotency_key": f"{item.id}_{item.row_version}",
+        }),
+        "editor_form": EditorVersionForm(initial={
+            "text": item.latest_version.text if item.latest_version else item.draft_text,
+            "expected_row_version": item.row_version,
+        }),
+        "request_changes_form": RequestChangesForm(initial={
+            "expected_row_version": item.row_version,
+        }),
+        "submit_review_form": SubmitReviewForm(initial={
+            "expected_row_version": item.row_version,
+            "idempotency_key": f"review_{item.id}_{item.row_version}",
+        }),
+    }
+    if context_extra:
+        ctx.update(context_extra)
+    return render(request, "workspaces/item_detail.html", ctx, status=status)
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemDetailView(View):
+    """Màn hình chi tiết bài viết & tác nghiệp nội dung (Spec UI05, F03, F04, B05)."""
+    def get(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+        return _render_item_detail(request, workspace, membership, package, item)
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemStartWritingView(View):
+    """Bắt đầu nhiệm vụ viết bài (TODO -> WRITING)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        try:
+            start_writing_task(user=request.user, item=item)
+            messages.success(request, "Đã bắt đầu thực hiện bài viết!")
+        except (ValidationError, PermissionDenied) as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            messages.error(request, f"Không thể bắt đầu: {err_msg}")
+
+        return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemSaveDraftView(View):
+    """Lưu bản nháp bài viết (F03, AC12)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = ContentDraftForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"draft_form": form},
+                status=400,
+            )
+
+        raw_urls = form.cleaned_data.get("reference_urls_text", "")
+        urls_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
+        exp_row = form.cleaned_data.get("expected_row_version")
+
+        try:
+            save_draft_content(
+                user=request.user,
+                item=item,
+                text=form.cleaned_data.get("text", ""),
+                reference_urls=urls_list,
+                expected_row_version=exp_row,
+            )
+            messages.success(request, "Đã lưu bản nháp thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"draft_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"draft_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemSubmitVersionView(View):
+    """Người viết nộp bài hoàn thành cho Biên tập (F03, AC06, AC08, AC10, AC12)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = ContentSubmitForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"submit_form": form},
+                status=400,
+            )
+
+        raw_urls = form.cleaned_data.get("reference_urls_text", "")
+        urls_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
+        exp_row = form.cleaned_data.get("expected_row_version")
+        idemp = form.cleaned_data.get("idempotency_key", "")
+
+        try:
+            submit_content_version(
+                user=request.user,
+                item=item,
+                text=form.cleaned_data.get("text", ""),
+                reference_urls=urls_list,
+                source=form.cleaned_data.get("source"),
+                expected_row_version=exp_row,
+                idempotency_key=idemp,
+            )
+            messages.success(request, "Đã nộp bài viết cho Biên tập thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"submit_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"submit_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemEditorVersionView(View):
+    """Biên tập viên tạo phiên bản chỉnh sửa mới (F04, AC06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = EditorVersionForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"editor_form": form},
+                status=400,
+            )
+
+        raw_urls = form.cleaned_data.get("reference_urls_text", "")
+        urls_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
+        exp_row = form.cleaned_data.get("expected_row_version")
+
+        try:
+            create_editor_version(
+                user=request.user,
+                item=item,
+                text=form.cleaned_data.get("text", ""),
+                reference_urls=urls_list,
+                expected_row_version=exp_row,
+            )
+            messages.success(request, "Đã tạo phiên bản chỉnh sửa mới thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"editor_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"editor_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemRequestChangesView(View):
+    """Biên tập viên yêu cầu người viết sửa lại (F04, AC06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = RequestChangesForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"request_changes_form": form},
+                status=400,
+            )
+
+        exp_row = form.cleaned_data.get("expected_row_version")
+        reason = form.cleaned_data.get("reason", "")
+
+        try:
+            request_changes_decision(
+                user=request.user,
+                item=item,
+                reason=reason,
+                expected_row_version=exp_row,
+            )
+            messages.success(request, "Đã yêu cầu người viết sửa lại bài!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"request_changes_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"request_changes_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemSubmitReviewView(View):
+    """Biên tập viên đánh dấu hoàn tất checklist và nộp Chủ duyệt (F04, 6.1)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = SubmitReviewForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"submit_review_form": form},
+                status=400,
+            )
+
+        exp_row = form.cleaned_data.get("expected_row_version")
+        idemp = form.cleaned_data.get("idempotency_key", "")
+        checklist = {
+            "brief_compliance": form.cleaned_data.get("brief_compliance"),
+            "factual_accuracy": form.cleaned_data.get("factual_accuracy"),
+            "voice_tone": form.cleaned_data.get("voice_tone"),
+            "cta_verified": form.cleaned_data.get("cta_verified"),
+        }
+
+        try:
+            submit_for_owner_review(
+                user=request.user,
+                item=item,
+                checklist=checklist,
+                expected_row_version=exp_row,
+                idempotency_key=idemp,
+            )
+            messages.success(request, "Đã nộp bài cho Chủ workspace phê duyệt thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"submit_review_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"submit_review_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class MyTasksView(View):
+    """Màn hình Việc của tôi (UI06, Spec F03, B05)."""
+    def get(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        status_filter = request.GET.get("status", "").strip()
+        tasks = get_my_tasks_for_workspace(workspace, request.user, status_filter=status_filter or None)
+
+        return render(
+            request,
+            "workspaces/my_tasks.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "tasks": tasks,
+                "status_filter": status_filter,
+            },
+        )
 @method_decorator(login_required, name="dispatch")
 class PackageListView(View):
     def get(self, request, workspace_id):

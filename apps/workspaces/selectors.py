@@ -176,7 +176,7 @@ def get_brand_profile(workspace: Workspace) -> BrandProfile | None:
         return None
     return BrandProfile.objects.filter(workspace=workspace).select_related("updated_by").first()
 
-from .models import ContentItem, Package, Task
+from .models import ContentItem, ContentVersion, Package, ReviewDecision, Task
 
 
 def get_workspace_packages(workspace: Workspace) -> QuerySet[Package]:
@@ -188,6 +188,51 @@ def get_workspace_packages(workspace: Workspace) -> QuerySet[Package]:
         .select_related("coordinator_membership", "coordinator_membership__user")
         .order_by("-created_at")
     )
+
+
+def get_item_versions(item: ContentItem) -> QuerySet[ContentVersion]:
+    """
+    Lấy danh sách các phiên bản nội dung của bài viết, sắp xếp từ mới nhất đến cũ nhất.
+    """
+    return (
+        ContentVersion.objects.filter(item=item)
+        .select_related("author_membership__user")
+        .order_by("-version_no")
+    )
+
+
+def get_item_decisions(item: ContentItem) -> QuerySet[ReviewDecision]:
+    """
+    Lấy danh sách các quyết định biên tập/duyệt của bài viết theo thứ tự thời gian.
+    """
+    return (
+        ReviewDecision.objects.filter(item=item)
+        .select_related("actor_membership__user", "version")
+        .order_by("-created_at")
+    )
+
+
+def get_my_tasks_for_workspace(
+    workspace: Workspace,
+    user: Any,
+    status_filter: str | None = None,
+) -> QuerySet[Task]:
+    """
+    Lấy danh sách nhiệm vụ tác nghiệp được phân công cho người dùng trong workspace (Spec UI06, B05).
+    Chỉ lấy các nhiệm vụ thuộc workspace và do membership của người dùng phụ trách.
+    """
+    qs = (
+        Task.objects.filter(
+            workspace=workspace,
+            assignee_membership__user=user,
+            assignee_membership__status=MembershipStatus.ACTIVE,
+        )
+        .select_related("item", "item__package", "assignee_membership__user")
+        .order_by("due_at", "-created_at")
+    )
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    return qs
 
 
 def get_package_for_workspace(workspace: Workspace, package_id: uuid.UUID | str) -> Package:

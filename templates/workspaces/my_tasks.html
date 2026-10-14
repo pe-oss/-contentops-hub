@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Việc của tôi — {{ workspace.name }}{% endblock %}
+
+{% block content %}
+<section class="dashboard-page" style="max-width: 900px; margin: 0 auto;">
+  <div class="dashboard-header" style="margin-bottom: 24px;">
+    <div>
+      <p class="eyebrow"><a href="{% url 'workspaces:detail' workspace.id %}">← {{ workspace.name }}</a></p>
+      <h1>📋 Việc của tôi</h1>
+      <p class="muted">Danh sách các nhiệm vụ được phân công cho bạn trong workspace này.</p>
+    </div>
+    <div>
+      <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn">📦 Kế hoạch &amp; Gói bài</a>
+    </div>
+  </div>
+
+  <!-- Bộ lọc trạng thái -->
+  <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">
+    <a href="{% url 'workspaces:my_tasks' workspace.id %}" class="btn {% if not status_filter %}btn-primary{% endif %}">Tất cả</a>
+    <a href="{% url 'workspaces:my_tasks' workspace.id %}?status=READY" class="btn {% if status_filter == 'READY' %}btn-primary{% endif %}">Sẵn sàng (READY)</a>
+    <a href="{% url 'workspaces:my_tasks' workspace.id %}?status=IN_PROGRESS" class="btn {% if status_filter == 'IN_PROGRESS' %}btn-primary{% endif %}">Đang làm</a>
+    <a href="{% url 'workspaces:my_tasks' workspace.id %}?status=WAITING" class="btn {% if status_filter == 'WAITING' %}btn-primary{% endif %}">Chờ bước trước</a>
+    <a href="{% url 'workspaces:my_tasks' workspace.id %}?status=DONE" class="btn {% if status_filter == 'DONE' %}btn-primary{% endif %}">Hoàn thành</a>
+  </div>
+
+  {% if tasks %}
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      {% for t in tasks %}
+        <div class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; {% if t.status == 'READY' %}border-left: 4px solid var(--primary);{% endif %}">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <span class="badge" style="font-size: 11px;">{{ t.get_role_display }}</span>
+              <span class="badge" style="font-size: 11px; background: {% if t.status == 'READY' %}#3b82f6; color: white;{% elif t.status == 'DONE' %}#10b981; color: white;{% else %}#f1f5f9; color: #475569;{% endif %}">
+                {{ t.get_status_display }}
+              </span>
+              {% if t.item.is_blocked %}
+                <span class="badge" style="background: #ef4444; color: white; font-size: 11px;">⚠️ Bị chặn</span>
+              {% endif %}
+            </div>
+            <h3 style="margin: 0 0 4px 0; font-size: 16px;">
+              <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" style="text-decoration: none; color: inherit;">
+                {{ t.item.title }}
+              </a>
+            </h3>
+            <p class="muted" style="margin: 0; font-size: 13px;">
+              Gói: <strong>{{ t.item.package.name }}</strong> &bull;
+              Hạn: <strong>{{ t.due_at|date:"H:i d/m/Y" }}</strong>
+            </p>
+          </div>
+          <div>
+            <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="btn btn-primary" style="font-size: 13px;">
+              Mở tác vụ →
+            </a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card" style="text-align: center; padding: 40px 20px;">
+      <p class="muted" style="margin-bottom: 12px;">Bạn không có nhiệm vụ nào trong danh mục này.</p>
+      <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn">Xem danh sách Gói nội dung</a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

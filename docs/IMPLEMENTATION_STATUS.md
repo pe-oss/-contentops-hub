@@ -6,7 +6,7 @@
 
 - **Spec cơ sở:** `docs/Spec-Ban-Content-Marketing-v1.0.md` (Phiên bản v1.0).
 - **Mốc xuất phát:** Nhánh `chore/boilerplate-baseline` (commit `4fd4046`).
-- **Nhánh hiện tại:** `feat/b03` (tiếp nối nhánh `feat/b02-workspace-members`, commit `bbf4938`).
+- **Nhánh hiện tại:** `feat/b05` (tiếp nối nhánh `feat/b04`, commit `62b8274`).
 
 | Giai đoạn / Nhiệm vụ | Trạng thái | Ghi chú |
 |---|---|---|
@@ -16,13 +16,67 @@
 | **B02 — Thành viên, Lời mời & Phân quyền chi tiết** | **HOÀN TẤT** | Spec mục 3.1, 3.2, 9, 10, 13 (Lời mời token SHA-256 hash, hạn 7 ngày, nhận atomic lock DB, ma trận quyền OWNER/MEMBER, bảo vệ Chủ) |
 | **B03 — Hồ sơ thương hiệu (Brand Profile)** | **HOÀN TẤT** | Spec mục 4, 7 UI02, 9, 10, 13, 14 AC15 (OneToOne unique, validate trường dữ liệu, HTTPS source URLs, auto-increment revision, optimistic concurrency 409, snapshot bất biến) |
 | **B04 — Gói, kế hoạch, phân công (Packages & Planning)** | CHƯA LÀM | Spec mục 4, 5 F02, 9, 13 B04 (Dừng trước B04 theo quy định) |
-| **B05 — Phiên bản và luồng viết/biên tập (Writing/Editing)** | CHƯA LÀM | Spec mục 5 F03-F04, 9, 13 B05 |
+| **B05 — Phiên bản và luồng viết/biên tập (Writing/Editing)** | **HOÀN TẤT** | Spec mục 5 F03-F04, 6, 9, 13 B05, 14 AC06/AC08/AC10/AC12 (ContentVersion bất biến, ReviewDecision append-only, Brief copy AI 1-click, Checklist 4 mục, OCC 409, phân quyền, Việc của tôi) |
 | **B06 — Chủ duyệt, mở lại, trạng thái (Approval & Lifecycle)** | CHƯA LÀM | Spec mục 5 F05, 9, 13 B06 |
 | **B07 — Xuất bản và hoàn thành gói (Publishing)** | CHƯA LÀM | Spec mục 5 F06, 9, 13 B07 |
 | **B08 — Blocker, đổi người, thu hồi (Task Reassignment)** | CHƯA LÀM | Spec mục 6, 9, 13 B08 |
 | **B09 — Tổng quan, Việc của tôi, thông báo (Dashboard & Tasks)** | CHƯA LÀM | Spec mục 7 UI01/UI06, 8, 9, 13 B09 |
 | **B10 — Responsive, lỗi, backup, QA lõi (Core QA)** | CHƯA LÀM | Spec mục 13 B10, 14 AC01-AC18 |
 
+---
+
+## 9. Chi tiết thực hiện B05 (Phiên bản & Luồng viết/biên tập)
+
+### 9.1. Mô hình Dữ liệu B05 (`apps/workspaces/models.py`)
+- Bổ sung trường `draft_text` (TextField) và `draft_reference_urls` (JSONField) vào `ContentItem` để người viết lưu nháp an toàn mà không cần tạo ContentVersion (AC12).
+- **`ContentVersion` (Phiên bản nội dung):**
+  - Lưu: `item`, `workspace`, `version_no` (tự tăng tuần tự duy nhất trong bài viết), `text`, `reference_urls` (JSONField HTTPS), `source` (`MANUAL` hoặc `EXTERNAL_AI`), `author_membership`, `parent_version`, `idempotency_key`, `created_at`.
+  - **Bất biến (Immutable):** Ghi đè `save()` chặn cập nhật bản ghi đã tồn tại.
+  - Ràng buộc: `UniqueConstraint(fields=["item", "version_no"])`.
+- **`ReviewDecision` (Quyết định biên tập/duyệt):**
+  - Lưu: `item`, `workspace`, `version`, `decision` (`REQUEST_CHANGES` hoặc `SUBMIT_REVIEW`), `return_stage`, `reason`, `checklist` (JSONField), `actor_membership`, `idempotency_key`, `created_at`.
+  - **Append-only:** Ghi đè `save()` chặn sửa bản ghi lịch sử đã tạo.
+
+### 9.2. Domain Services B05 (`apps/workspaces/services.py`)
+- `format_brief_for_copy()`: Tạo văn bản Brief chuẩn hóa để người viết sao chép 1-click sang AI riêng (ChatGPT/Claude/Gemini). Gồm mục tiêu, đối tượng, giọng văn, yêu cầu bài, điều tránh, định dạng đầu ra và yêu cầu bắt buộc đánh dấu `[CẦN XÁC MINH]`.
+- `start_writing_task()`: Chuyển bài `TODO` -> `WRITING`, nhiệm vụ `TaskRole.WRITE` từ `READY` -> `IN_PROGRESS`.
+- `save_draft_content()`: Cho phép lưu nháp; giữ nguyên nội dung khi gặp lỗi; cho phép lưu ngay cả khi bài bị `BLOCKED` (AC12); kiểm tra optimistic concurrency `row_version` (AC10).
+- `submit_content_version()`:
+  - Người viết nộp bản hoàn chỉnh cho biên tập viên.
+  - Chặn nộp nếu bài đang bị `BLOCKED` (AC12) hoặc đang ở trạng thái `OWNER_REVIEW` (AC08).
+  - Sinh `ContentVersion` bất biến với `version_no` tự tăng tuần tự.
+  - Chuyển `ContentItem.state` từ `WRITING` -> `EDITING`.
+  - Đồng bộ `TaskRole.WRITE` -> `DONE` và `TaskRole.EDIT` -> `READY`.
+  - Hỗ trợ chống double-click qua `idempotency_key`.
+- `create_editor_version()`: Biên tập viên chỉnh sửa và sinh phiên bản mới với `version_no` tăng tiếp, giữ nguyên vẹn phiên bản của người viết (AC06).
+- `request_changes_decision()`:
+  - Biên tập viên yêu cầu sửa có lý do bắt buộc.
+  - Chuyển `ContentItem.state` từ `EDITING` -> `WRITING`.
+  - Lưu bản ghi `ReviewDecision` append-only.
+  - Mở lại `TaskRole.WRITE` thành `IN_PROGRESS`, đưa `TaskRole.EDIT` về `WAITING` (Spec 6.2, AC06).
+- `submit_for_owner_review()`:
+  - Biên tập viên hoàn tất 4 tiêu chí checklist (đúng brief, chính xác dữ liệu, giọng văn, CTA).
+  - Chuyển `ContentItem.state` sang `OWNER_REVIEW`, `TaskRole.EDIT` -> `DONE`.
+
+### 9.3. Giao diện & Trải nghiệm Người dùng B05
+- `templates/workspaces/item_detail.html`: Màn hình tác nghiệp chi tiết bài viết (UI05) chia theo công đoạn, tích hợp nút sao chép brief 1-click, các form thao tác nộp bài/sửa bài/trả bài, lịch sử phiên bản và quyết định biên tập.
+- `templates/workspaces/my_tasks.html`: Màn hình "Việc của tôi" (UI06) lọc theo trạng thái nhiệm vụ (READY, IN_PROGRESS, WAITING, DONE).
+
+### 9.4. Kết quả Kiểm thử Tự động B05 (13/13 tests Passed)
+- Kiểm thử `core/tests_b05_content_operations.py`:
+  - Database test isolation.
+  - Định dạng Brief sao chép sang AI riêng (F03).
+  - Luồng hoàn chỉnh từ Viết bài đến Biên tập và Chủ duyệt.
+  - Vòng lặp yêu cầu sửa có lý do (AC06) và giữ nguyên phiên bản cũ.
+  - Kiểm tra checklist bắt buộc 4 mục khi nộp duyệt (F04).
+  - Ma trận phân quyền: chặn người không có thẩm quyền / sai vai trò.
+  - Cách ly tenant: Outsider và Inactive member nhận HTTP 404.
+  - Chặn người viết nộp bài khi đang ở OWNER_REVIEW (AC08).
+  - Xử lý bài bị chặn (AC12): cho phép lưu nháp, từ chối nộp bài.
+  - Optimistic concurrency control 409 (AC10).
+  - Chống double-click với idempotency key.
+  - Kiểm tra HTTPS URLs tham khảo.
+  - Màn hình Việc của tôi (UI06).
 ---
 
 ## 2. Chi tiết thực hiện B00.1 (Runtime & Configuration)

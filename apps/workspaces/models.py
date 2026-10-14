@@ -753,6 +753,16 @@ class ContentItem(models.Model):
         default=1,
         verbose_name="Phiên bản dòng (Row Version)",
     )
+    draft_text = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Bản nháp đang viết (B05)",
+    )
+    draft_reference_urls = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="URLs tham khảo bản nháp (B05)",
+    )
     order = models.PositiveIntegerField(
         default=0,
         verbose_name="Thứ tự hiển thị",
@@ -770,6 +780,18 @@ class ContentItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title} [{self.get_state_display()}] ({self.package.name})"
+    @property
+    def is_blocked(self) -> bool:
+        """Kiểm tra bài viết có đang bị cờ chặn hay không (Spec 6.1, AC12)."""
+        return bool(self.blocked_reason and self.blocked_reason.strip())
+
+    @property
+    def latest_version(self):
+        """Lấy phiên bản mới nhất gắn với latest_version_id."""
+        if not self.latest_version_id:
+            return None
+        return self.versions.filter(id=self.latest_version_id).first()
+
 
     def clean(self) -> None:
         super().clean()
@@ -826,6 +848,183 @@ class ContentItem(models.Model):
                 raise ValidationError({"planned_publish_at": f"Thời điểm dự kiến đăng ({self.planned_publish_at.date()}) không được sau ngày kết thúc gói ({pkg.end_date})."})
 
 
+class ContentVersion(models.Model):
+    """
+    Phiên bản nội dung bài viết (ContentVersion) - Spec mục 5 F03-F04, 9, 13 B05:
+    - Bất biến (immutable): nộp/sửa không ghi đè, luôn sinh phiên bản mới với version_no tăng tuần tự.
+    - Ràng buộc: unique(item, version_no).
+    - Lưu text, reference_urls (HTTPS), source (MANUAL / EXTERNAL_AI), tác giả, phiên bản gốc.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="content_versions",
+        verbose_name="Workspace",
+    )
+    item = models.ForeignKey(
+        ContentItem,
+        on_delete=models.CASCADE,
+        related_name="versions",
+        verbose_name="Bài viết",
+    )
+    version_no = models.PositiveIntegerField(
+        verbose_name="Số thứ tự phiên bản",
+    )
+    text = models.TextField(
+        verbose_name="Nội dung bài viết",
+    )
+    reference_urls = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="URLs tham khảo (HTTPS)",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=TaskExecutionMode.choices,
+        default=TaskExecutionMode.MANUAL,
+        verbose_name="Nguồn tạo",
+    )
+    author_membership = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="authored_versions",
+        verbose_name="Tác giả phiên bản",
+    )
+    parent_version = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="child_versions",
+        verbose_name="Phiên bản gốc",
+    )
+    idempotency_key = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        verbose_name="Khóa chống trùng lặp (Idempotency Key)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Thời điểm tạo")
+
+    class Meta:
+        verbose_name = "Phiên bản nội dung"
+        verbose_name_plural = "Phiên bản nội dung"
+        ordering = ["version_no"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "version_no"],
+                name="unique_item_version_no",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["item", "created_at"], name="idx_ver_item_created"),
+            models.Index(fields=["workspace", "created_at"], name="idx_ver_ws_created"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.item.title} - v{self.version_no}"
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding and ContentVersion.objects.filter(pk=self.pk).exists():
+            raise ValidationError("ContentVersion là bản ghi bất biến (immutable) và không thể chỉnh sửa.")
+        super().save(*args, **kwargs)
+
+
+class ReviewDecision(models.Model):
+    """
+    Quyết định biên tập / duyệt bài viết (ReviewDecision) - Spec mục 5 F04-F05, 9, 13 B05:
+    - Ghi nhận quyết định yêu cầu sửa (REQUEST_CHANGES) hoặc nộp Chủ duyệt (SUBMIT_REVIEW).
+    - Append-only: lưu lịch sử các vòng kiểm tra và phản hồi.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="review_decisions",
+        verbose_name="Workspace",
+    )
+    item = models.ForeignKey(
+        ContentItem,
+        on_delete=models.CASCADE,
+        related_name="review_decisions",
+        verbose_name="Bài viết",
+    )
+    version = models.ForeignKey(
+        ContentVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="decisions",
+        verbose_name="Phiên bản xem xét",
+    )
+    decision = models.CharField(
+        max_length=30,
+        choices=[
+            ("REQUEST_CHANGES", "Yêu cầu sửa"),
+            ("SUBMIT_REVIEW", "Nộp Chủ duyệt"),
+        ],
+        verbose_name="Loại quyết định",
+    )
+    return_stage = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name="Công đoạn trả về",
+    )
+    reason = models.TextField(
+        max_length=2000,
+        blank=True,
+        default="",
+        verbose_name="Lý do / Hướng dẫn sửa",
+    )
+    checklist = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Checklist kiểm tra biên tập",
+    )
+    actor_membership = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="review_decisions",
+        verbose_name="Người đưa ra quyết định",
+    )
+    idempotency_key = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        verbose_name="Khóa chống trùng lặp (Idempotency Key)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Thời điểm quyết định")
+
+    class Meta:
+        verbose_name = "Quyết định biên tập"
+        verbose_name_plural = "Quyết định biên tập"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["item", "created_at"], name="idx_decision_item_created"),
+            models.Index(fields=["workspace", "created_at"], name="idx_decision_ws_created"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.item.title} - {self.get_decision_display()} ({self.created_at.strftime('%d/%m/%Y %H:%M')})"
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding and ReviewDecision.objects.filter(pk=self.pk).exists():
+            raise ValidationError("ReviewDecision là bản ghi append-only và không thể chỉnh sửa.")
+        super().save(*args, **kwargs)
 class Task(models.Model):
     """
     Nhiệm vụ tác nghiệp (Task) - Spec mục 6.2, 9, 13:

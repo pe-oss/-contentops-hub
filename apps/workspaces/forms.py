@@ -286,7 +286,7 @@ class BrandProfileForm(forms.Form):
             cleaned.append(u)
         return cleaned
 
-from .models import Membership, MembershipStatus
+from .models import Membership, MembershipStatus, TaskExecutionMode
 
 
 class PackageForm(forms.Form):
@@ -368,6 +368,153 @@ class PackageForm(forms.Form):
         if start and end and end < start:
             self.add_error("end_date", "Ngày kết thúc không được trước ngày bắt đầu.")
         return cleaned_data
+
+
+class ContentDraftForm(forms.Form):
+    """Form lưu nháp bài viết cho người viết (F03)."""
+    text = forms.CharField(
+        required=False,
+        label="Nội dung bản nháp",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 10,
+                "placeholder": "Soạn thảo bài viết hoặc dán nội dung từ AI tại đây...",
+            }
+        ),
+    )
+    reference_urls_text = forms.CharField(
+        required=False,
+        label="URLs tham khảo / kiểm chứng (mỗi URL một dòng, giao thức HTTPS)",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 2,
+                "placeholder": "https://example.com/source1\nhttps://example.com/source2",
+            }
+        ),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class ContentSubmitForm(forms.Form):
+    """Form nộp bài viết cho biên tập (F03, AC06)."""
+    text = forms.CharField(
+        required=True,
+        label="Nội dung bài viết",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 12,
+                "placeholder": "Nhập toàn văn nội dung bài viết hoàn chỉnh...",
+            }
+        ),
+    )
+    reference_urls_text = forms.CharField(
+        required=False,
+        label="URLs tham khảo / nguồn tư liệu (HTTPS)",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 2,
+                "placeholder": "https://example.com/source1",
+            }
+        ),
+    )
+    source = forms.ChoiceField(
+        choices=TaskExecutionMode.choices,
+        initial=TaskExecutionMode.MANUAL,
+        label="Hình thức viết bài",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+    idempotency_key = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class EditorVersionForm(forms.Form):
+    """Form biên tập viên tạo phiên bản chỉnh sửa mới (F04, AC06)."""
+    text = forms.CharField(
+        required=True,
+        label="Nội dung sau khi chỉnh sửa",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 12,
+                "placeholder": "Chỉnh sửa nội dung cho phiên bản mới...",
+            }
+        ),
+    )
+    reference_urls_text = forms.CharField(
+        required=False,
+        label="URLs tham khảo / nguồn bổ sung (HTTPS)",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 2,
+                "placeholder": "https://example.com/source1",
+            }
+        ),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class RequestChangesForm(forms.Form):
+    """Form biên tập viên yêu cầu người viết sửa lại (F04, AC06)."""
+    reason = forms.CharField(
+        required=True,
+        label="Lý do và yêu cầu cần sửa",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 3,
+                "placeholder": "Chỉ rõ các điểm chưa đạt brief, sai lệch dữ liệu, hoặc giọng văn cần điều chỉnh...",
+            }
+        ),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class SubmitReviewForm(forms.Form):
+    """Form biên tập viên đánh dấu hoàn tất checklist và nộp Chủ duyệt (F04, 6.1)."""
+    brief_compliance = forms.BooleanField(
+        required=True,
+        label="1. Đúng brief, mục tiêu chiến dịch và yêu cầu bài viết",
+    )
+    factual_accuracy = forms.BooleanField(
+        required=True,
+        label="2. Đảm bảo độ chính xác của số liệu và tài liệu cung cấp",
+    )
+    voice_tone = forms.BooleanField(
+        required=True,
+        label="3. Đúng định vị, giọng văn thương hiệu và không vi phạm điều tránh",
+    )
+    cta_verified = forms.BooleanField(
+        required=True,
+        label="4. Kêu gọi hành động (CTA) đã kiểm tra và phù hợp",
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+    idempotency_key = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
 class ContentItemForm(forms.Form):
     title = forms.CharField(
         max_length=200,

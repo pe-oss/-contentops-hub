@@ -3,6 +3,13 @@ from django.urls import path
 from .views import (
     BrandProfileView,
     ContentItemCreateView,
+    ContentItemDetailView,
+    ContentItemEditorVersionView,
+    ContentItemRequestChangesView,
+    ContentItemSaveDraftView,
+    ContentItemStartWritingView,
+    ContentItemSubmitReviewView,
+    ContentItemSubmitVersionView,
     ContentItemUpdateView,
     InvitationAcceptView,
     MemberDeactivateView,
@@ -11,6 +18,7 @@ from .views import (
     PackageApprovePlanView,
     PackageCreateView,
     PackageDetailView,
+    MyTasksView,
     PackageListView,
     PackageUpdateView,
     WorkspaceCreateView,
@@ -53,6 +61,46 @@ urlpatterns = [
         "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/edit/",
         ContentItemUpdateView.as_view(),
         name="item_edit",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/",
+        ContentItemDetailView.as_view(),
+        name="item_detail",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/start-writing/",
+        ContentItemStartWritingView.as_view(),
+        name="item_start_writing",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/save-draft/",
+        ContentItemSaveDraftView.as_view(),
+        name="item_save_draft",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/submit-version/",
+        ContentItemSubmitVersionView.as_view(),
+        name="item_submit_version",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/editor-version/",
+        ContentItemEditorVersionView.as_view(),
+        name="item_editor_version",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/request-changes/",
+        ContentItemRequestChangesView.as_view(),
+        name="item_request_changes",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/submit-review/",
+        ContentItemSubmitReviewView.as_view(),
+        name="item_submit_review",
+    ),
+    path(
+        "<uuid:workspace_id>/my-tasks/",
+        MyTasksView.as_view(),
+        name="my_tasks",
     ),
 
     # Members & Invitations (B02)

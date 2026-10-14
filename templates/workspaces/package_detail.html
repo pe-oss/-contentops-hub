@@ -67,6 +67,7 @@
               </div>
               <div style="display: flex; gap: 8px; align-items: center;">
                 <span class="badge" style="font-size: 11px;">{{ item.get_state_display }}</span>
+                <a href="{% url 'workspaces:item_detail' workspace.id package.id item.id %}" class="btn btn-primary" style="font-size: 12px; padding: 4px 8px;">Mở bài viết →</a>
                 {% if can_edit_items %}
                   <a href="{% url 'workspaces:item_edit' workspace.id package.id item.id %}" class="btn" style="font-size: 12px; padding: 4px 8px;">Sửa bài</a>
                 {% endif %}
