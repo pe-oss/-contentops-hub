@@ -497,6 +497,8 @@ class ConcurrentVerificationConcurrencyTests(TransactionTestCase):
                 barrier.wait(timeout=5)
                 success, msg, _ = verify_email_token(uidb64, token)
                 results.append((success, msg))
+            except Exception as exc:
+                results.append((False, str(exc)))
             finally:
                 connection.close()
 

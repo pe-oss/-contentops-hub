@@ -1099,6 +1099,74 @@ class ContentApproval(models.Model):
         status_str = "Hợp lệ" if self.is_active else f"Vô hiệu ({self.invalidated_at.strftime('%d/%m/%Y')})"
         return f"Duyệt {self.item.title} - v{self.version.version_no} [{status_str}]"
 
+
+class ContentPublication(models.Model):
+    """
+    Bản ghi xuất bản bài viết (Publication) - Spec mục 5 F06, 6.1, 9, 13 B07, AC13, AC14:
+    - Lưu lịch sử đăng bài có URL, thời điểm đăng, version_id và approval_id được chốt.
+    - Ghi nhận người xác nhận (recorded_by) và thời điểm ghi nhận (recorded_at).
+    - SaaS ghi 'Đã đăng — do [người] xác nhận'; không tuyên bố đã kiểm chứng Facebook.
+    - Giữ bản ghi cũ trong lịch sử khi bài viết được mở lại và xuất bản lần tiếp theo.
+    - Cho phép sửa metadata (URL, thời điểm đăng) kèm lý do sửa (audit), không cho đổi version/approval.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="content_publications",
+        verbose_name="Workspace",
+    )
+    item = models.ForeignKey(
+        ContentItem,
+        on_delete=models.CASCADE,
+        related_name="publications",
+        verbose_name="Bài viết",
+    )
+    version = models.ForeignKey(
+        ContentVersion,
+        on_delete=models.PROTECT,
+        related_name="publications",
+        verbose_name="Phiên bản nội dung đã đăng",
+    )
+    approval = models.ForeignKey(
+        ContentApproval,
+        on_delete=models.PROTECT,
+        related_name="publications",
+        verbose_name="Bản phê duyệt tương ứng",
+    )
+    url = models.URLField(
+        max_length=2000,
+        verbose_name="URL bài viết đã xuất bản",
+    )
+    published_at = models.DateTimeField(
+        verbose_name="Thời điểm xuất bản thực tế",
+    )
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="recorded_publications",
+        verbose_name="Người xác nhận đăng",
+    )
+    recorded_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="Thời điểm ghi nhận",
+    )
+
+    class Meta:
+        verbose_name = "Bản ghi xuất bản"
+        verbose_name_plural = "Bản ghi xuất bản"
+        ordering = ["-recorded_at"]
+        indexes = [
+            models.Index(fields=["item", "recorded_at"], name="idx_pub_item_recorded"),
+            models.Index(fields=["workspace", "recorded_at"], name="idx_pub_ws_recorded"),
+        ]
+
 class Task(models.Model):
     """
     Nhiệm vụ tác nghiệp (Task) - Spec mục 6.2, 9, 13:

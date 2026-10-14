@@ -657,12 +657,14 @@ from .forms import (
     EditorVersionForm, PackageForm, RequestChangesForm, SubmitReviewForm,
     OwnerApproveItemForm, OwnerRequestChangesForm, WithdrawReviewForm,
     ReopenItemForm, CancelContentItemForm, BlockContentItemForm,
+    RecordPublicationForm, EditPublicationMetadataForm,
 )
 from .models import ContentItemState, PackageStatus, TaskRole, TaskStatus
 from .selectors import (
     get_item_decisions,
     get_item_active_approval,
     get_item_approvals,
+    get_item_publications,
     get_item_for_workspace,
     get_item_tasks,
     get_item_versions,
@@ -680,6 +682,8 @@ from .services import (
     cancel_content_item,
     block_content_item,
     unblock_content_item,
+    record_content_publication,
+    update_publication_metadata,
     approve_plan,
     create_package,
     create_editor_version,
@@ -708,12 +712,15 @@ def _render_item_detail(
     decisions = get_item_decisions(item)
     approvals = get_item_approvals(item)
     active_approval = get_item_active_approval(item)
+    publications = get_item_publications(item)
     tasks = get_item_tasks(item)
     is_owner = (membership.access_role == AccessRole.OWNER)
     is_writer = (item.writer_membership_id == membership.id)
     is_editor = (item.editor_membership_id == membership.id)
+    is_publisher = (item.publisher_membership_id == membership.id)
     can_write = is_owner or is_writer
     can_edit = is_owner or is_editor
+    can_publish = is_owner or is_publisher
     brief_copy_text = format_brief_for_copy(item)
 
     default_urls_text = "\n".join(item.draft_reference_urls) if item.draft_reference_urls else ""
@@ -726,12 +733,15 @@ def _render_item_detail(
         "decisions": decisions,
         "approvals": approvals,
         "active_approval": active_approval,
+        "publications": publications,
         "tasks": tasks,
         "is_owner": is_owner,
         "is_writer": is_writer,
         "is_editor": is_editor,
+        "is_publisher": is_publisher,
         "can_write": can_write,
         "can_edit": can_edit,
+        "can_publish": can_publish,
         "brief_copy_text": brief_copy_text,
         "draft_form": ContentDraftForm(initial={
             "text": item.draft_text,
@@ -774,6 +784,13 @@ def _render_item_detail(
             "expected_row_version": item.row_version,
         }),
         "block_form": BlockContentItemForm(initial={
+            "expected_row_version": item.row_version,
+        }),
+        "record_publication_form": RecordPublicationForm(initial={
+            "expected_row_version": item.row_version,
+            "idempotency_key": f"pub_{item.id}_{item.row_version}",
+        }),
+        "edit_publication_form": EditPublicationMetadataForm(initial={
             "expected_row_version": item.row_version,
         }),
     }
@@ -822,6 +839,107 @@ class ContentItemBlockView(View):
             return _render_item_detail(
                 request, workspace, membership, package, item,
                 context_extra={"block_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemRecordPublicationView(View):
+    """Ghi nhận xuất bản bài viết (Spec F06, 6.1, 9, 13 B07, AC13)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = RecordPublicationForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"record_publication_form": form},
+                status=400,
+            )
+
+        url = form.cleaned_data.get("url")
+        published_at = form.cleaned_data.get("published_at")
+        exp_row = form.cleaned_data.get("expected_row_version")
+        idemp_key = form.cleaned_data.get("idempotency_key")
+
+        try:
+            publication, updated_item = record_content_publication(
+                user=request.user,
+                item=item,
+                url=url,
+                published_at=published_at,
+                expected_row_version=exp_row,
+                idempotency_key=idemp_key,
+            )
+            messages.success(request, f"Đã ghi nhận xuất bản bài viết thành công: '{publication.url}'")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"record_publication_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except PermissionDenied as exc:
+            raise PermissionDenied(str(exc))
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"record_publication_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentPublicationEditView(View):
+    """Chỉnh sửa metadata của bản ghi xuất bản (Spec F06, 10 B07)."""
+    def post(self, request, workspace_id, package_id, item_id, publication_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        is_owner = (membership.access_role == AccessRole.OWNER)
+        is_publisher = (item.publisher_membership_id == membership.id)
+        if not is_owner and not is_publisher:
+            raise PermissionDenied("Chỉ người xuất bản được phân công hoặc Chủ workspace mới có quyền sửa thông tin đăng.")
+
+        from .models import ContentPublication
+        try:
+            pub = ContentPublication.objects.get(id=publication_id, item=item, workspace=workspace)
+        except ContentPublication.DoesNotExist:
+            raise Http404("Không tìm thấy bản ghi xuất bản.")
+
+        form = EditPublicationMetadataForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"edit_publication_form": form},
+                status=400,
+            )
+
+        url = form.cleaned_data.get("url")
+        published_at = form.cleaned_data.get("published_at")
+        reason = form.cleaned_data.get("reason")
+
+        try:
+            update_publication_metadata(
+                user=request.user,
+                publication=pub,
+                url=url,
+                published_at=published_at,
+                reason=reason,
+            )
+            messages.success(request, "Đã cập nhật thông tin xuất bản thành công.")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"edit_publication_form": form},
                 status=400,
             )
 
@@ -1460,6 +1578,10 @@ class PackageDetailView(View):
 
         can_edit_items = is_owner or (is_coordinator and package.is_draft)
 
+        published_count = items.filter(state=ContentItemState.PUBLISHED).count()
+        cancelled_count = items.filter(state=ContentItemState.CANCELLED).count()
+        target_count = items.exclude(state=ContentItemState.CANCELLED).count()
+
         return render(
             request,
             "workspaces/package_detail.html",
@@ -1471,6 +1593,9 @@ class PackageDetailView(View):
                 "is_owner": is_owner,
                 "is_coordinator": is_coordinator,
                 "can_edit_items": can_edit_items,
+                "published_count": published_count,
+                "cancelled_count": cancelled_count,
+                "target_count": target_count,
             },
         )
 

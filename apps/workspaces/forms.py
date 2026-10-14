@@ -132,6 +132,69 @@ class BlockContentItemForm(forms.Form):
     expected_row_version = forms.IntegerField(required=False, widget=forms.HiddenInput())
 
 
+class RecordPublicationForm(forms.Form):
+    """Form ghi nhận xuất bản bài viết (Spec F06, 6.1, 9, 13 B07, AC13)."""
+    url = forms.URLField(
+        required=True,
+        max_length=2000,
+        label="URL bài viết đã đăng",
+        error_messages={"required": "Bắt buộc nhập URL bài viết đã xuất bản."},
+        widget=forms.URLInput(attrs={
+            "class": "form-control",
+            "placeholder": "https://facebook.com/permalink...",
+            "required": "required",
+        }),
+        help_text="Bắt buộc URL bài viết hợp lệ (HTTPS hoặc HTTP).",
+    )
+    published_at = forms.DateTimeField(
+        required=True,
+        label="Thời điểm xuất bản thực tế",
+        error_messages={"required": "Bắt buộc nhập thời điểm xuất bản thực tế."},
+        widget=forms.DateTimeInput(attrs={
+            "class": "form-control",
+            "type": "datetime-local",
+            "required": "required",
+        }),
+        help_text="Thời điểm bài viết được đăng trên kênh.",
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+    idempotency_key = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class EditPublicationMetadataForm(forms.Form):
+    """Form sửa nhầm URL/thời điểm đăng bài (Spec F06, B07)."""
+    url = forms.URLField(
+        required=True,
+        max_length=2000,
+        label="URL bài viết đã đăng (chỉnh sửa)",
+        error_messages={"required": "Bắt buộc nhập URL bài viết hợp lệ."},
+        widget=forms.URLInput(attrs={"class": "form-control", "required": "required"}),
+    )
+    published_at = forms.DateTimeField(
+        required=True,
+        label="Thời điểm xuất bản thực tế",
+        error_messages={"required": "Bắt buộc nhập thời điểm xuất bản thực tế."},
+        widget=forms.DateTimeInput(attrs={"class": "form-control", "type": "datetime-local", "required": "required"}),
+    )
+    reason = forms.CharField(
+        required=True,
+        label="Lý do chỉnh sửa URL / thời điểm",
+        error_messages={"required": "Bắt buộc ghi rõ lý do chỉnh sửa URL / thời điểm xuất bản để lưu audit trail."},
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Nêu rõ lý do sửa nhầm thông tin đăng..."}),
+        help_text="Bắt buộc ghi rõ lý do sửa để lưu audit trail.",
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
 class WorkspaceUpdateForm(forms.Form):
     name = forms.CharField(
         max_length=100,

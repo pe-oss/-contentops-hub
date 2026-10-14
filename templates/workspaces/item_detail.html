@@ -349,6 +349,44 @@
       <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 16px; border-radius: 6px;">
         <h4 style="margin: 0 0 8px 0; color: #166534;">Sẵn sàng đăng bài (READY_TO_PUBLISH)</h4>
         <p style="margin: 0 0 12px 0; font-size: 14px;">Chủ workspace đã phê duyệt nội dung phiên bản <strong>v{{ active_approval.version.version_no }}</strong>. Người xuất bản chuẩn bị đăng lên kênh (Công đoạn B07).</p>
+
+        <!-- THAO TÁC XUẤT BẢN DÀNH CHO PUBLISHER / CHỦ (B07) -->
+        {% if can_publish %}
+          <div style="background: white; border: 1px solid #bbf7d0; padding: 14px; border-radius: 6px; margin-bottom: 12px;">
+            <h5 style="margin: 0 0 8px 0; color: #166534;">📢 Ghi nhận xuất bản bài viết (B07)</h5>
+            <p style="margin: 0 0 12px 0; font-size: 13px; color: #4b5563;">
+              Vui lòng sao chép đúng nội dung bản duyệt <strong>v{{ active_approval.version.version_no }}</strong> ở trên, đăng thủ công lên kênh <strong>{{ item.package.channel }}</strong>, sau đó nhập URL và thời điểm đăng bài để xác nhận hoàn tất.
+            </p>
+            <form method="post" action="{% url 'workspaces:item_record_publication' workspace.id package.id item.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+              <input type="hidden" name="idempotency_key" value="pub_{{ item.id }}_{{ item.row_version }}">
+
+              {% if record_publication_form.errors %}
+                <div style="background: #fef2f2; border: 1px solid #f87171; color: #991b1b; padding: 10px; border-radius: 4px; margin-bottom: 12px; font-size: 13px;">
+                  {% for field, errors in record_publication_form.errors.items %}
+                    {% for err in errors %}
+                      <div>&bull; {{ err }}</div>
+                    {% endfor %}
+                  {% endfor %}
+                </div>
+              {% endif %}
+
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label style="font-size: 13px; font-weight: 500;">URL bài viết đã đăng:</label>
+                <input type="url" name="url" value="{{ record_publication_form.url.value|default:'' }}" class="form-control" placeholder="https://facebook.com/permalink/..." required>
+              </div>
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label style="font-size: 13px; font-weight: 500;">Thời điểm đăng bài:</label>
+                <input type="datetime-local" name="published_at" value="{{ record_publication_form.published_at.value|default:'' }}" class="form-control" required>
+              </div>
+              <button type="submit" class="btn" style="background: #16a34a; color: white; font-weight: 500;" onclick="return confirm('Xác nhận bài viết đã được đăng theo đúng phiên bản được duyệt?');">
+                ✓ Xác nhận đã đăng bài (SaaS ghi nhận)
+              </button>
+            </form>
+          </div>
+        {% endif %}
+
         {% if is_owner %}
           <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
             <details>
@@ -369,7 +407,60 @@
     {% elif item.state == "PUBLISHED" %}
       <div style="background: #ecfdf5; border: 1px solid #10b981; padding: 16px; border-radius: 6px;">
         <h4 style="margin: 0 0 8px 0; color: #047857;">Bài viết đã xuất bản (PUBLISHED)</h4>
-        <p style="margin: 0 0 12px 0; font-size: 14px;">Bài viết đã được đăng theo bản duyệt v{{ active_approval.version.version_no }}.</p>
+        <p style="margin: 0 0 12px 0; font-size: 14px;">Bài viết đã được ghi nhận xuất bản theo bản duyệt <strong>v{{ active_approval.version.version_no }}</strong>.</p>
+        
+        {% if publications.first %}
+          {% with latest_pub=publications.first %}
+            <div style="background: white; border: 1px solid #a7f3d0; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+              <div style="font-size: 14px; margin-bottom: 6px;">
+                <strong>🔗 Link bài viết:</strong> <a href="{{ latest_pub.url }}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: underline;">{{ latest_pub.url }}</a>
+              </div>
+              <div style="font-size: 13px; color: #4b5563;">
+                <strong>Đã đăng:</strong> {{ latest_pub.published_at|date:"H:i d/m/Y" }} — <em>do {{ latest_pub.recorded_by.get_full_name|default:latest_pub.recorded_by.username }} xác nhận</em>
+              </div>
+
+              <!-- NÚT SỬA NHẦM URL / THỜI ĐIỂM (Spec F06) -->
+              {% if can_publish %}
+                <div style="margin-top: 10px;">
+                  <details>
+                    <summary style="font-size: 12px; color: #059669; cursor: pointer;">✏️ Sửa nhầm URL / Thời điểm đăng</summary>
+                    <form method="post" action="{% url 'workspaces:publication_edit_metadata' workspace.id package.id item.id latest_pub.id %}" style="margin-top: 8px; background: #f0fdf4; padding: 10px; border-radius: 4px; border: 1px solid #bbf7d0;">
+                      {% csrf_token %}
+                      <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+
+                      {% if edit_publication_form.errors %}
+                        <div style="background: #fef2f2; border: 1px solid #f87171; color: #991b1b; padding: 8px; border-radius: 4px; margin-bottom: 8px; font-size: 12px;">
+                          {% for field, errors in edit_publication_form.errors.items %}
+                            {% for err in errors %}
+                              <div>&bull; {{ err }}</div>
+                            {% endfor %}
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+
+                      <div class="form-group" style="margin-bottom: 8px;">
+                        <label style="font-size: 12px; font-weight: 500;">URL mới:</label>
+                        <input type="url" name="url" value="{{ edit_publication_form.url.value|default:latest_pub.url }}" class="form-control" required>
+                      </div>
+                      <div class="form-group" style="margin-bottom: 8px;">
+                        <label style="font-size: 12px; font-weight: 500;">Thời điểm đăng mới:</label>
+                        <input type="datetime-local" name="published_at" value="{{ edit_publication_form.published_at.value|default:latest_pub.published_at|date:'Y-m-d\TH:i' }}" class="form-control" required>
+                      </div>
+                      <div class="form-group" style="margin-bottom: 8px;">
+                        <label style="font-size: 12px; font-weight: 500;">Lý do chỉnh sửa (audit):</label>
+                        <textarea name="reason" class="form-control" rows="2" placeholder="Ví dụ: Nhập nhầm link bài viết..." required>{{ edit_publication_form.reason.value|default:'' }}</textarea>
+                      </div>
+                      <button type="submit" class="btn" style="background: #059669; color: white; font-size: 12px;">
+                        Lưu sửa đổi URL / Thời điểm
+                      </button>
+                    </form>
+                  </details>
+                </div>
+              {% endif %}
+            </div>
+          {% endwith %}
+        {% endif %}
+
         {% if is_owner %}
           <details>
             <summary style="font-size: 13px; color: #047857; cursor: pointer;">🔄 Mở lại bài đã đăng để chỉnh sửa</summary>
@@ -440,6 +531,35 @@
       </div>
     </div>
   {% endif %}
+
+  <!-- LỊCH SỬ XUẤT BẢN (CONTENT PUBLICATIONS - B07) -->
+  {% if publications %}
+    <div class="card" style="margin-bottom: 24px;">
+      <h3 style="margin-top: 0; margin-bottom: 16px;">Lịch sử ghi nhận xuất bản ({{ publications.count }})</h3>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        {% for pub in publications %}
+          <div style="border-left: 3px solid #10b981; padding: 10px 14px; background: #f0fdf4; border-radius: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong>Bản duyệt v{{ pub.version.version_no }}</strong>
+                {% if forloop.first and item.state == "PUBLISHED" %}
+                  <span class="badge" style="background: #dcfce7; color: #166534; font-size: 11px;">Bản đăng hiện hành</span>
+                {% endif %}
+              </div>
+              <span class="muted" style="font-size: 12px;">Ghi nhận lúc {{ pub.recorded_at|date:"H:i d/m/Y" }}</span>
+            </div>
+            <p style="margin: 6px 0 2px 0; font-size: 13px;">
+              <strong>Link:</strong> <a href="{{ pub.url }}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: underline;">{{ pub.url }}</a>
+            </p>
+            <p class="muted" style="margin: 2px 0 0 0; font-size: 12px;">
+              Thời điểm đăng: {{ pub.published_at|date:"H:i d/m/Y" }} &bull; Người xác nhận: <strong>{{ pub.recorded_by.get_full_name|default:pub.recorded_by.username }}</strong>
+            </p>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
   <!-- LỊCH SỬ CÁC PHIÊN BẢN (CONTENT VERSIONS) -->
   <div class="card" style="margin-bottom: 24px;">
     <h3 style="margin-top: 0; margin-bottom: 16px;">Lịch sử các phiên bản nội dung ({{ versions.count }})</h3>

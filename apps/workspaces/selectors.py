@@ -176,7 +176,18 @@ def get_brand_profile(workspace: Workspace) -> BrandProfile | None:
         return None
     return BrandProfile.objects.filter(workspace=workspace).select_related("updated_by").first()
 
-from .models import ContentApproval, ContentItem, ContentVersion, Package, ReviewDecision, Task
+from .models import ContentApproval, ContentItem, ContentPublication, ContentVersion, Package, ReviewDecision, Task
+
+
+def get_item_publications(item: ContentItem) -> QuerySet[ContentPublication]:
+    """
+    Lấy lịch sử xuất bản của bài viết (Spec F06, 9 B07), sắp xếp mới nhất trước.
+    """
+    return (
+        ContentPublication.objects.filter(item=item)
+        .select_related("version", "approval", "recorded_by")
+        .order_by("-recorded_at")
+    )
 
 
 def get_item_active_approval(item: ContentItem) -> ContentApproval | None:

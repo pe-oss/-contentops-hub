@@ -15,13 +15,77 @@
 | **B01 — Workspace & Cách ly dữ liệu (Tenant Isolation)** | **HOÀN TẤT** | Workspace UUID, membership OWNER nguyên tử, cách ly truy cập 404, kiểm soát quyền sửa 403, chống giả mạo |
 | **B02 — Thành viên, Lời mời & Phân quyền chi tiết** | **HOÀN TẤT** | Spec mục 3.1, 3.2, 9, 10, 13 (Lời mời token SHA-256 hash, hạn 7 ngày, nhận atomic lock DB, ma trận quyền OWNER/MEMBER, bảo vệ Chủ) |
 | **B03 — Hồ sơ thương hiệu (Brand Profile)** | **HOÀN TẤT** | Spec mục 4, 7 UI02, 9, 10, 13, 14 AC15 (OneToOne unique, validate trường dữ liệu, HTTPS source URLs, auto-increment revision, optimistic concurrency 409, snapshot bất biến) |
-| **B04 — Gói, kế hoạch, phân công (Packages & Planning)** | CHƯA LÀM | Spec mục 4, 5 F02, 9, 13 B04 (Dừng trước B04 theo quy định) |
+| **B04 — Gói, kế hoạch, phân công (Packages & Planning)** | **HOÀN TẤT** | Spec mục 4, 5 F02, 9, 13 B04, 14 AC04/AC05 (Gói 50 bài, deadline 4 chặng, 3 vai trò, duyệt kế hoạch snapshot thương hiệu bất biến, sinh Task) |
 | **B05 — Phiên bản và luồng viết/biên tập (Writing/Editing)** | **HOÀN TẤT** | Spec mục 5 F03-F04, 6, 9, 13 B05, 14 AC06/AC08/AC10/AC12 (ContentVersion bất biến, ReviewDecision append-only, Brief copy AI 1-click, Checklist 4 mục, OCC 409, phân quyền, Việc của tôi) |
 | **B06 — Chủ duyệt, mở lại, trạng thái (Approval & Lifecycle)** | **HOÀN TẤT** | Spec mục 5 F05, 6, 9, 13 B06, 14 AC07/AC08/AC09/AC10/AC12 (Chủ duyệt version chốt, ContentApproval append-only & invalidation khi mở lại, stale version 409, phân quyền Chủ, nút rút duyệt, cờ chặn/gỡ chặn blocker, UI05 tác nghiệp hoàn chỉnh) |
-| **B07 — Xuất bản và hoàn thành gói (Publishing)** | CHƯA LÀM | Spec mục 5 F06, 9, 13 B07 |
+| **B07 — Xuất bản và hoàn thành gói (Publishing)** | **HOÀN TẤT** | Spec mục 5 F06, 6.1, 6.2, 7 UI04, 9, 10, 13 B07, 14 AC12/AC13/AC14 (ContentPublication lưu lịch sử xuất bản có URL, thời điểm, approval/version chốt; Task PUBLISH -> DONE; tự động hoàn thành gói COMPLETED; giữ lịch sử khi mở lại; sửa metadata audit trail; OCC 409 & Idempotency) |
 | **B08 — Blocker, đổi người, thu hồi (Task Reassignment)** | CHƯA LÀM | Spec mục 6, 9, 13 B08 |
 | **B09 — Tổng quan, Việc của tôi, thông báo (Dashboard & Tasks)** | CHƯA LÀM | Spec mục 7 UI01/UI06, 8, 9, 13 B09 |
 | **B10 — Responsive, lỗi, backup, QA lõi (Core QA)** | CHƯA LÀM | Spec mục 13 B10, 14 AC01-AC18 |
+
+## 11. Chi tiết thực hiện B07 (Ghi nhận xuất bản & Hoàn thành gói)
+
+### 11.1. Mô hình Dữ liệu B07 (`apps/workspaces/models.py`)
+- **`ContentPublication` (Bản ghi xuất bản bài viết - Spec mục 5 F06, 6.1, 9, 13 B07, AC13, AC14):**
+  - Lưu trữ: `id` (UUID), `workspace`, `item`, `version` (bản version_id cụ thể đã được duyệt), `approval` (bản phê duyệt có hiệu lực tương ứng), `url` (bắt buộc URL hợp lệ), `published_at` (thời điểm xuất bản thực tế), `recorded_by` (người xác nhận đăng), `recorded_at` (thời điểm ghi nhận).
+  - SaaS ghi rõ: *"Đã đăng — do [người] xác nhận"* (không tuyên bố đã kiểm chứng tự động Facebook API).
+  - Giữ lại bản ghi cũ trong DB khi bài viết được mở lại và xuất bản phiên bản mới.
+  - Sắp xếp và chỉ mục: `ordering = ["-recorded_at"]`, `idx_pub_item_recorded` (`item`, `recorded_at`), `idx_pub_ws_recorded` (`workspace`, `recorded_at`).
+  - Đăng ký và quản trị qua `apps/workspaces/admin.py` (`ContentPublicationAdmin`).
+  - Migration: `apps/workspaces/migrations/0009_contentpublication.py`.
+
+### 11.2. Domain Services B07 (`apps/workspaces/services.py`)
+- `record_content_publication()`:
+  - Phân quyền: Chỉ Người xuất bản được phân công (`item.publisher_membership`) hoặc Chủ workspace (`AccessRole.OWNER`) có quyền ghi nhận.
+  - Kiểm tra trạng thái bài viết: Bắt buộc ở `READY_TO_PUBLISH`.
+  - Kiểm tra phê duyệt: Bắt buộc có `ContentApproval` có hiệu lực (`invalidated_at is None`) gắn đúng `version` đã duyệt (AC13).
+  - Chặn xuất bản khi bài bị `BLOCKED` (AC12).
+  - Ràng buộc dữ liệu: URL bắt buộc hợp lệ (scheme + netloc), thời điểm đăng bắt buộc.
+  - Optimistic Concurrency Control (OCC): Xác thực `expected_row_version` chống xung đột 409 (AC10).
+  - Idempotency: Hỗ trợ `idempotency_key` chống double-click (AC13).
+  - Chuyển `ContentItem.state` từ `READY_TO_PUBLISH` -> `PUBLISHED`, tăng `row_version`.
+  - Cập nhật `TaskRole.PUBLISH` từ `READY` -> `DONE` (Spec 6.2).
+  - Tự động đồng bộ trạng thái gói `_sync_package_status`: Nếu tất cả bài không hủy đã `PUBLISHED` -> gói tự động chuyển sang `COMPLETED` (Spec 6.2, AC14).
+- `update_publication_metadata()`:
+  - Chỉnh sửa nhầm URL hoặc thời điểm đăng thực tế (Spec F06, mục 10).
+  - Bắt buộc có lý do sửa (`reason`) để lưu vết audit trail.
+  - Không cho phép thay đổi `version_id`, `approval_id`, hay `item`.
+- `_sync_package_status()`:
+  - Tự động chuyển `ACTIVE` -> `COMPLETED` khi có ít nhất một bài không hủy và tất cả bài không hủy đã `PUBLISHED`.
+  - Mở lại bài làm gói `COMPLETED` tự động trở lại `ACTIVE`.
+  - Nếu tất cả bài bị hủy: không hiện hoàn thành (giữ nguyên trạng thái để Chủ xử lý hủy gói).
+
+### 11.3. Giao diện Người dùng B07 (`templates/workspaces/`)
+- `templates/workspaces/item_detail.html`:
+  - Trạng thái `READY_TO_PUBLISH`: Hiển thị form ghi nhận xuất bản cho Người xuất bản/Chủ (URL, thời điểm đăng, CSRF, idempotency key, giữ dữ liệu form khi validation lỗi).
+  - Trạng thái `PUBLISHED`: Hiển thị thông tin xuất bản hiện hành (Link bài viết, thời điểm đăng, người xác nhận). Cung cấp form sửa nhầm URL/thời điểm đăng kèm lý do (audit trail).
+  - Lịch sử xuất bản: Hiển thị danh sách các lần xuất bản `publications` với nhãn bản đăng hiện hành.
+- `templates/workspaces/package_detail.html`:
+  - Hiển thị tiến độ xuất bản chuẩn xác: `x/y bài đã đăng` (Spec UI04, AC14).
+  - Bài hủy được hiển thị riêng và loại trừ khỏi mẫu số tiến độ.
+
+### 11.4. Bộ Kiểm thử B07 (`core/tests_b07_content_publication.py`)
+- Gồm 18 ca kiểm thử chuyên sâu bao phủ toàn diện:
+  1. `test_record_publication_success_publisher`: Người xuất bản được phân công ghi nhận thành công, sinh ContentPublication, chuyển Task PUBLISH -> DONE, bài chuyển PUBLISHED.
+  2. `test_record_publication_success_owner`: Chủ workspace ghi nhận xuất bản thay mặt publisher.
+  3. `test_record_publication_forbidden_writer_and_editor`: Writer và Editor không có quyền bị từ chối 403 PermissionDenied.
+  4. `test_record_publication_blocked_item_rejected_ac12`: Bài bị chặn (BLOCKED) từ chối xuất bản; sau khi unblock thì xuất bản thành công (AC12).
+  5. `test_record_publication_invalid_state_rejected`: Bài chưa đến trạng thái READY_TO_PUBLISH bị từ chối.
+  6. `test_record_publication_no_active_approval_rejected_ac13`: Bài chưa có duyệt hoặc duyệt đã bị vô hiệu bị từ chối (AC13).
+  7. `test_record_publication_missing_or_invalid_url_rejected_ac13`: URL rỗng hoặc sai định dạng bị từ chối (AC13).
+  8. `test_record_publication_missing_published_at_rejected`: Thiếu thời điểm đăng bị từ chối.
+  9. `test_record_publication_idempotency_ac13`: Gửi lặp cùng idempotency_key trả về bản ghi cũ, không nhân bản (AC13).
+  10. `test_record_publication_occ_conflict_409_ac10`: Lệch expected_row_version nhận lỗi 409 OCC (AC10).
+  11. `test_reopen_and_republish_preserves_publication_history_spec_f06`: Bài đã đăng khi mở lại giữ nguyên lịch sử xuất bản cũ, xuất bản lần tiếp theo ghi nhận bản duyệt mới (Spec F06).
+  12. `test_edit_publication_metadata_success`: Sửa nhầm URL/thời điểm đăng thành công, bảo toàn version/approval.
+  13. `test_edit_publication_metadata_missing_reason_rejected`: Sửa metadata thiếu lý do bị từ chối.
+  14. `test_package_completion_ac14_two_published_one_cancelled`: 2 bài đăng, 1 bài hủy -> gói hoàn thành 2/2 COMPLETED, hiện 1 bài hủy (AC14).
+  15. `test_package_completion_ac14_all_three_cancelled_not_completed`: Cả 3 bài bị hủy -> gói không hiện hoàn thành (AC14).
+  16. `test_package_reverts_to_active_on_reopen_spec_6_2`: Mở lại bài trong gói COMPLETED đưa gói về ACTIVE (Spec 6.2).
+  17. `test_view_record_publication_http_post`: Kiểm thử View POST ghi nhận, redirect 302, validation 400 và OCC 409.
+  18. `test_view_edit_publication_metadata_http_post`: Kiểm thử View POST sửa metadata thành công.
+
+---
 
 ## 10. Chi tiết thực hiện B06 (Chủ duyệt, Mở lại & Vòng đời bài viết)
 

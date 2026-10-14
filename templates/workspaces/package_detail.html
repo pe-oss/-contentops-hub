@@ -53,6 +53,29 @@
     <p style="margin: 0; line-height: 1.6; white-space: pre-wrap; font-size: 14px;">{{ package.objective }}</p>
   </div>
 
+  <div class="card" style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+    <div>
+      <h4 style="margin: 0 0 4px 0;">📊 Tiến độ xuất bản (Spec UI04, AC14)</h4>
+      <p class="muted" style="margin: 0; font-size: 13px;">
+        Đã đăng: <strong>{{ published_count }}/{{ target_count }}</strong> bài
+        {% if cancelled_count %}
+          &bull; <span style="color: #c5221f;">{{ cancelled_count }} bài đã hủy (không tính vào mẫu số tiến độ)</span>
+        {% endif %}
+      </p>
+    </div>
+    <div>
+      {% if package.status == 'COMPLETED' %}
+        <span class="badge" style="background: #e6f4ea; color: #137333; font-size: 12px; padding: 6px 12px;">✓ Gói đã hoàn thành</span>
+      {% elif package.status == 'ACTIVE' %}
+        <span class="badge badge-pro" style="font-size: 12px; padding: 6px 12px;">Đang thực hiện</span>
+      {% elif package.status == 'DRAFT' %}
+        <span class="badge" style="background: #fff3e0; color: #e65100; font-size: 12px; padding: 6px 12px;">Kế hoạch nháp</span>
+      {% else %}
+        <span class="badge" style="background: #fce8e6; color: #c5221f; font-size: 12px; padding: 6px 12px;">Đã hủy</span>
+      {% endif %}
+    </div>
+  </div>
+
   <div style="margin-top: 28px;">
     <h3 style="margin: 0 0 12px 0;">Danh sách bài viết trong kế hoạch ({{ items.count }}/50)</h3>
 

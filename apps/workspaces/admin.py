@@ -111,7 +111,7 @@ class BrandProfileAdmin(admin.ModelAdmin):
     list_filter = ("revision", "updated_at")
     search_fields = ("name", "workspace__name", "product_summary")
     readonly_fields = ("id", "revision", "created_at", "updated_at")
-from .models import ContentApproval, ContentItem, ContentVersion, Package, PlanApproval, ReviewDecision, Task
+from .models import ContentApproval, ContentItem, ContentPublication, ContentVersion, Package, PlanApproval, ReviewDecision, Task
 
 
 class ContentItemInline(admin.TabularInline):
@@ -176,4 +176,12 @@ class ContentApprovalAdmin(admin.ModelAdmin):
     list_filter = ("approved_at", "invalidated_at")
     search_fields = ("item__title", "approved_by__username", "invalidation_reason")
     readonly_fields = ("id", "workspace", "item", "version", "approved_by", "approved_at", "invalidated_at", "invalidation_reason", "idempotency_key")
+
+
+@admin.register(ContentPublication)
+class ContentPublicationAdmin(admin.ModelAdmin):
+    list_display = ("item", "version", "url", "published_at", "recorded_by", "recorded_at")
+    list_filter = ("published_at", "recorded_at")
+    search_fields = ("item__title", "url", "recorded_by__username")
+    readonly_fields = ("id", "workspace", "item", "version", "approval", "recorded_at")
 

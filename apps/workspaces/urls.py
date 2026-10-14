@@ -11,6 +11,8 @@ from .views import (
     ContentItemCancelView,
     ContentItemBlockView,
     ContentItemUnblockView,
+    ContentItemRecordPublicationView,
+    ContentPublicationEditView,
     ContentItemEditorVersionView,
     ContentItemRequestChangesView,
     ContentItemSaveDraftView,
@@ -83,6 +85,16 @@ urlpatterns = [
         "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/cancel/",
         ContentItemCancelView.as_view(),
         name="item_cancel",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/publications/",
+        ContentItemRecordPublicationView.as_view(),
+        name="item_record_publication",
+    ),
+    path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/publications/<uuid:publication_id>/edit/",
+        ContentPublicationEditView.as_view(),
+        name="publication_edit_metadata",
     ),
     path(
         "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/block/",

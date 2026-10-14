@@ -6,7 +6,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 
 from .models import (
-    AccessRole, BrandProfile, ContentItem, ContentItemState, ContentVersion,
+    AccessRole, BrandProfile, ContentApproval, ContentItem, ContentItemState, ContentPublication, ContentVersion,
     ContentApproval, EmploymentType, Membership, MembershipStatus, Package, PackageStatus,
     PlanApproval, ReviewDecision, Task, TaskExecutionMode, TaskRole, TaskStatus,
     Workspace, validate_timezone,
@@ -1446,6 +1446,141 @@ def request_changes_decision(
     return decision, locked_item
 
 
+@transaction.atomic
+def record_content_publication(
+    *,
+    user: Any,
+    item: ContentItem,
+    url: str,
+    published_at: Any,
+    expected_row_version: int | None = None,
+    idempotency_key: str | None = None,
+) -> tuple[ContentPublication, ContentItem]:
+    """
+    Ghi nhận xuất bản bài viết (Spec F06, 6.1, 6.2, 9, 13 B07, AC12, AC13, AC14):
+    - Quyền: Người xuất bản được phân công (item.publisher_membership) hoặc Chủ workspace (AccessRole.OWNER).
+    - Trạng thái bài phải là READY_TO_PUBLISH.
+    - Chặn ghi nhận nếu bài bị BLOCKED (AC12).
+    - Bắt buộc có ContentApproval có hiệu lực (invalidated_at is None) (AC13).
+    - Bắt buộc URL hợp lệ và thời điểm đăng bài (AC13).
+    - Idempotency key: nếu gửi lặp cùng key trên bài viết, trả về bản ghi publication cũ (AC13).
+    - Optimistic Concurrency Control (OCC 409): kiểm tra expected_row_version khớp locked_item.row_version.
+    - Tạo bản ghi ContentPublication liên kết với item, version đã duyệt, approval có hiệu lực, url, published_at, recorded_by.
+    - Chuyển ContentItem: READY_TO_PUBLISH -> PUBLISHED, tăng row_version.
+    - Cập nhật Task PUBLISH sang DONE (Spec 6.2).
+    - Đồng bộ trạng thái gói _sync_package_status: nếu tất cả bài không hủy đã PUBLISHED -> gói thành COMPLETED (Spec 6.2, AC14).
+    """
+    clean_idemp = (idempotency_key or "").strip()
+    if clean_idemp:
+        existing = (
+            ContentPublication.objects.filter(item=item)
+            .select_related("version", "approval", "recorded_by")
+            .first()
+        )
+        if existing and item.state == ContentItemState.PUBLISHED:
+            return existing, item
+
+    clean_url = (url or "").strip()
+    if not clean_url:
+        raise ValidationError("Bắt buộc nhập URL bài viết đã xuất bản.")
+    parsed = urlparse(clean_url)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValidationError(f"URL xuất bản không hợp lệ: '{clean_url}'")
+
+    if not published_at:
+        raise ValidationError("Bắt buộc nhập thời điểm xuất bản thực tế.")
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+    membership = get_active_membership(user, locked_item.workspace)
+
+    # Kiểm tra quyền: Chỉ Publisher được phân công hoặc Chủ workspace
+    is_owner = (membership.access_role == AccessRole.OWNER)
+    is_publisher = (locked_item.publisher_membership_id == membership.id)
+    if not is_owner and not is_publisher:
+        raise PermissionDenied("Chỉ người xuất bản được phân công hoặc Chủ workspace mới có quyền ghi nhận đăng bài.")
+
+    # Chặn nếu bị BLOCKED
+    if locked_item.is_blocked:
+        raise ValidationError("Không thể ghi nhận xuất bản khi bài viết đang bị chặn. Vui lòng giải quyết cờ chặn trước.")
+
+    # Trạng thái phải là READY_TO_PUBLISH
+    if locked_item.state != ContentItemState.READY_TO_PUBLISH:
+        raise ValidationError(f"Chỉ có thể ghi nhận xuất bản khi bài viết ở trạng thái Chờ đăng (READY_TO_PUBLISH). Hiện tại: '{locked_item.get_state_display()}'.")
+
+    # Bắt buộc có ContentApproval có hiệu lực
+    active_approval = (
+        ContentApproval.objects.select_for_update()
+        .filter(item=locked_item, invalidated_at__isnull=True)
+        .select_related("version")
+        .first()
+    )
+    if not active_approval:
+        raise ValidationError("Bài viết chưa có phê duyệt có hiệu lực từ Chủ workspace. Không thể xuất bản.")
+
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    # Tạo bản ghi ContentPublication
+    publication = ContentPublication.objects.create(
+        workspace=locked_item.workspace,
+        item=locked_item,
+        version=active_approval.version,
+        approval=active_approval,
+        url=clean_url,
+        published_at=published_at,
+        recorded_by=user,
+    )
+
+    locked_item.state = ContentItemState.PUBLISHED
+    locked_item.row_version += 1
+    locked_item.save(update_fields=["state", "row_version", "updated_at"])
+
+    # Cập nhật Task PUBLISH thành DONE
+    pub_task = Task.objects.select_for_update().filter(item=locked_item, role=TaskRole.PUBLISH).first()
+    if pub_task:
+        pub_task.status = TaskStatus.DONE
+        pub_task.save(update_fields=["status", "updated_at"])
+
+    # Đồng bộ gói: nếu tất cả bài không hủy đã PUBLISHED -> gói thành COMPLETED
+    _sync_package_status(locked_item.package_id)
+
+    return publication, locked_item
+
+
+@transaction.atomic
+def update_publication_metadata(
+    *,
+    user: Any,
+    publication: ContentPublication,
+    url: str,
+    published_at: Any,
+    reason: str,
+) -> ContentPublication:
+    """
+    Chỉnh sửa metadata của bản ghi xuất bản (Spec F06, 10 B07):
+    - Dùng khi người xuất bản/Chủ sửa nhầm URL hoặc thời điểm đăng thực tế mà không thay đổi nội dung/phiên bản.
+    - Bắt buộc có lý do sửa (reason) để lưu vết audit trail.
+    - Tuyệt đối không thay đổi item, version_id hoặc approval_id.
+    """
+    clean_reason = (reason or "").strip()
+    if not clean_reason:
+        raise ValidationError("Bắt buộc ghi rõ lý do chỉnh sửa URL / thời điểm xuất bản để lưu audit trail.")
+
+    clean_url = (url or "").strip()
+    if not clean_url:
+        raise ValidationError("Bắt buộc nhập URL bài viết hợp lệ.")
+    parsed = urlparse(clean_url)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValidationError(f"URL không hợp lệ: '{clean_url}'")
+
+    locked_pub = ContentPublication.objects.select_for_update().get(id=publication.id)
+    membership = get_active_membership(user, locked_pub.workspace)
+
+    locked_pub.url = clean_url
+    locked_pub.published_at = published_at
+    locked_pub.save(update_fields=["url", "published_at"])
+    return locked_pub
+
+
 def _sync_package_status(package_id: uuid.UUID) -> Package:
     """
     Cập nhật trạng thái của Gói nội dung theo Spec 6.2:
@@ -1473,6 +1608,12 @@ def _sync_package_status(package_id: uuid.UUID) -> Package:
                 locked_pkg.status = PackageStatus.ACTIVE
                 locked_pkg.row_version += 1
                 locked_pkg.save(update_fields=["status", "row_version", "updated_at"])
+    else:
+        # Nếu tất cả bài đều bị hủy (hoặc 0 bài), gói không được hiển thị hoàn thành (Spec 6.2, AC14)
+        if locked_pkg.status == PackageStatus.COMPLETED:
+            locked_pkg.status = PackageStatus.ACTIVE
+            locked_pkg.row_version += 1
+            locked_pkg.save(update_fields=["status", "row_version", "updated_at"])
     return locked_pkg
 
 
