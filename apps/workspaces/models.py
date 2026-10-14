@@ -975,6 +975,10 @@ class ReviewDecision(models.Model):
         choices=[
             ("REQUEST_CHANGES", "Yêu cầu sửa"),
             ("SUBMIT_REVIEW", "Nộp Chủ duyệt"),
+            ("APPROVE", "Chủ duyệt bài viết"),
+            ("WITHDRAW_REVIEW", "Rút gửi duyệt"),
+            ("REOPEN", "Mở lại bài viết"),
+            ("CANCEL", "Hủy bài viết"),
         ],
         verbose_name="Loại quyết định",
     )
@@ -1025,6 +1029,69 @@ class ReviewDecision(models.Model):
         if not self._state.adding and ReviewDecision.objects.filter(pk=self.pk).exists():
             raise ValidationError("ReviewDecision là bản ghi append-only và không thể chỉnh sửa.")
         super().save(*args, **kwargs)
+
+
+class ContentApproval(models.Model):
+    """
+    Bản ghi phê duyệt bài viết (Approval) - Spec mục 6.1, 6.3, 9, 13 B06:
+    - Trỏ version_id cố định được Chủ duyệt.
+    - Ghi nhận người duyệt (approved_by), thời điểm duyệt (approved_at).
+    - Quản lý hiệu lực: invalidated_at, invalidation_reason khi mở lại bài (REOPENED).
+    - Mỗi bài viết tối đa một approval có hiệu lực (invalidated_at__isnull=True).
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="content_approvals",
+        verbose_name="Workspace",
+    )
+    item = models.ForeignKey(
+        ContentItem,
+        on_delete=models.CASCADE,
+        related_name="approvals",
+        verbose_name="Bài viết",
+    )
+    version = models.ForeignKey(
+        ContentVersion,
+        on_delete=models.PROTECT,
+        related_name="approvals",
+        verbose_name="Phiên bản nội dung được duyệt",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="approved_contents",
+        verbose_name="Chủ workspace duyệt",
+    )
+    approved_at = models.DateTimeField(auto_now_add=True, verbose_name="Thời điểm duyệt")
+    invalidated_at = models.DateTimeField(null=True, blank=True, verbose_name="Thời điểm vô hiệu hóa")
+    invalidation_reason = models.TextField(blank=True, default="", max_length=2000, verbose_name="Lý do vô hiệu hóa")
+    idempotency_key = models.CharField(max_length=128, blank=True, default="", verbose_name="Khóa Idempotency")
+
+    class Meta:
+        verbose_name = "Bản ghi phê duyệt nội dung"
+        verbose_name_plural = "Bản ghi phê duyệt nội dung"
+        ordering = ["-approved_at"]
+        indexes = [
+            models.Index(fields=["item", "invalidated_at"], name="idx_appr_item_inval"),
+            models.Index(fields=["workspace", "approved_at"], name="idx_appr_ws_approved"),
+        ]
+
+    @property
+    def is_active(self) -> bool:
+        return self.invalidated_at is None
+
+    def __str__(self) -> str:
+        status_str = "Hợp lệ" if self.is_active else f"Vô hiệu ({self.invalidated_at.strftime('%d/%m/%Y')})"
+        return f"Duyệt {self.item.title} - v{self.version.version_no} [{status_str}]"
+
 class Task(models.Model):
     """
     Nhiệm vụ tác nghiệp (Task) - Spec mục 6.2, 9, 13:

@@ -176,9 +176,30 @@ def get_brand_profile(workspace: Workspace) -> BrandProfile | None:
         return None
     return BrandProfile.objects.filter(workspace=workspace).select_related("updated_by").first()
 
-from .models import ContentItem, ContentVersion, Package, ReviewDecision, Task
+from .models import ContentApproval, ContentItem, ContentVersion, Package, ReviewDecision, Task
 
 
+def get_item_active_approval(item: ContentItem) -> ContentApproval | None:
+    """
+    Lấy phê duyệt đang có hiệu lực của bài viết (Spec B06, 6.1, 6.3).
+    Mỗi bài viết chỉ có tối đa một phê duyệt hợp lệ (invalidated_at__isnull=True).
+    """
+    return (
+        ContentApproval.objects.filter(item=item, invalidated_at__isnull=True)
+        .select_related("version", "approved_by")
+        .first()
+    )
+
+
+def get_item_approvals(item: ContentItem) -> QuerySet[ContentApproval]:
+    """
+    Lấy lịch sử phê duyệt của bài viết (cả hợp lệ và đã bị vô hiệu khi mở lại).
+    """
+    return (
+        ContentApproval.objects.filter(item=item)
+        .select_related("version", "approved_by")
+        .order_by("-approved_at")
+    )
 def get_workspace_packages(workspace: Workspace) -> QuerySet[Package]:
     """
     Lấy danh sách các Gói nội dung thuộc workspace.

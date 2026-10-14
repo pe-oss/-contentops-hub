@@ -655,10 +655,14 @@ class InvitationAcceptView(View):
 from .forms import (
     ContentDraftForm, ContentItemForm, ContentSubmitForm,
     EditorVersionForm, PackageForm, RequestChangesForm, SubmitReviewForm,
+    OwnerApproveItemForm, OwnerRequestChangesForm, WithdrawReviewForm,
+    ReopenItemForm, CancelContentItemForm, BlockContentItemForm,
 )
 from .models import ContentItemState, PackageStatus, TaskRole, TaskStatus
 from .selectors import (
     get_item_decisions,
+    get_item_active_approval,
+    get_item_approvals,
     get_item_for_workspace,
     get_item_tasks,
     get_item_versions,
@@ -669,6 +673,13 @@ from .selectors import (
 )
 from .services import (
     add_content_item,
+    owner_approve_item,
+    owner_request_changes,
+    withdraw_review,
+    reopen_content_item,
+    cancel_content_item,
+    block_content_item,
+    unblock_content_item,
     approve_plan,
     create_package,
     create_editor_version,
@@ -695,6 +706,8 @@ def _render_item_detail(
     """Helper render màn hình chi tiết bài viết tác nghiệp (UI05)."""
     versions = get_item_versions(item)
     decisions = get_item_decisions(item)
+    approvals = get_item_approvals(item)
+    active_approval = get_item_active_approval(item)
     tasks = get_item_tasks(item)
     is_owner = (membership.access_role == AccessRole.OWNER)
     is_writer = (item.writer_membership_id == membership.id)
@@ -711,6 +724,8 @@ def _render_item_detail(
         "item": item,
         "versions": versions,
         "decisions": decisions,
+        "approvals": approvals,
+        "active_approval": active_approval,
         "tasks": tasks,
         "is_owner": is_owner,
         "is_writer": is_writer,
@@ -740,11 +755,335 @@ def _render_item_detail(
             "expected_row_version": item.row_version,
             "idempotency_key": f"review_{item.id}_{item.row_version}",
         }),
+        "owner_approve_form": OwnerApproveItemForm(initial={
+            "expected_version_id": item.latest_version_id,
+            "expected_row_version": item.row_version,
+            "idempotency_key": f"approve_{item.id}_{item.latest_version_id}",
+        }),
+        "owner_request_changes_form": OwnerRequestChangesForm(initial={
+            "return_stage": "WRITING",
+            "expected_row_version": item.row_version,
+        }),
+        "withdraw_review_form": WithdrawReviewForm(initial={
+            "expected_row_version": item.row_version,
+        }),
+        "reopen_form": ReopenItemForm(initial={
+            "expected_row_version": item.row_version,
+        }),
+        "cancel_form": CancelContentItemForm(initial={
+            "expected_row_version": item.row_version,
+        }),
+        "block_form": BlockContentItemForm(initial={
+            "expected_row_version": item.row_version,
+        }),
     }
     if context_extra:
         ctx.update(context_extra)
     return render(request, "workspaces/item_detail.html", ctx, status=status)
 
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemBlockView(View):
+    """Báo bài viết bị chặn (Spec F07, 6.1, AC12, B06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = BlockContentItemForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"block_form": form},
+                status=400,
+            )
+
+        reason = form.cleaned_data.get("reason")
+        exp_row = form.cleaned_data.get("expected_row_version")
+
+        try:
+            block_content_item(
+                user=request.user,
+                item=item,
+                reason=reason,
+                expected_row_version=exp_row,
+            )
+            messages.warning(request, "Đã đặt cờ chặn bài viết thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"block_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"block_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemUnblockView(View):
+    """Giải quyết và gỡ chặn bài viết (Spec F07, 6.1, AC12, B06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = BlockContentItemForm(request.POST)
+        resolution_note = form.cleaned_data.get("reason") if form.is_valid() else request.POST.get("reason", "")
+        exp_row = request.POST.get("expected_row_version")
+
+        try:
+            unblock_content_item(
+                user=request.user,
+                item=item,
+                resolution_note=resolution_note,
+                expected_row_version=exp_row,
+            )
+            messages.success(request, "Đã gỡ chặn bài viết thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"block_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"block_form": form},
+                status=400,
+            )
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemOwnerApproveView(View):
+    """Chủ workspace phê duyệt bài viết (F05, 6.1, AC07, B06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = OwnerApproveItemForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"owner_approve_form": form},
+                status=400,
+            )
+
+        expected_ver = form.cleaned_data.get("expected_version_id")
+        exp_row = form.cleaned_data.get("expected_row_version")
+        idemp = form.cleaned_data.get("idempotency_key")
+
+        try:
+            owner_approve_item(
+                user=request.user,
+                item=item,
+                expected_version_id=expected_ver,
+                expected_row_version=exp_row,
+                idempotency_key=idemp,
+            )
+            messages.success(request, "Đã phê duyệt bài viết thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"owner_approve_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"owner_approve_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemOwnerRequestChangesView(View):
+    """Chủ workspace yêu cầu sửa và chỉ định bước trả về (F05, 6.1, B06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = OwnerRequestChangesForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"owner_request_changes_form": form},
+                status=400,
+            )
+
+        stage = form.cleaned_data.get("return_stage")
+        reason = form.cleaned_data.get("reason")
+        exp_row = form.cleaned_data.get("expected_row_version")
+
+        try:
+            owner_request_changes(
+                user=request.user,
+                item=item,
+                return_stage=stage,
+                reason=reason,
+                expected_row_version=exp_row,
+            )
+            messages.success(request, f"Đã trả bài về bước {stage} để sửa lại!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"owner_request_changes_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"owner_request_changes_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemWithdrawReviewView(View):
+    """Biên tập viên hoặc Chủ rút gửi duyệt có lý do (F05, 6.1, B06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = WithdrawReviewForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"withdraw_review_form": form},
+                status=400,
+            )
+
+        reason = form.cleaned_data.get("reason")
+        exp_row = form.cleaned_data.get("expected_row_version")
+
+        try:
+            withdraw_review(
+                user=request.user,
+                item=item,
+                reason=reason,
+                expected_row_version=exp_row,
+            )
+            messages.success(request, "Đã rút gửi duyệt thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"withdraw_review_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"withdraw_review_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemReopenView(View):
+    """Chủ workspace mở lại bài viết (F05, F06, 6.1, AC09, B06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = ReopenItemForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"reopen_form": form},
+                status=400,
+            )
+
+        reason = form.cleaned_data.get("reason")
+        exp_row = form.cleaned_data.get("expected_row_version")
+
+        try:
+            reopen_content_item(
+                user=request.user,
+                item=item,
+                reason=reason,
+                expected_row_version=exp_row,
+            )
+            messages.success(request, "Đã mở lại bài viết thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"reopen_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"reopen_form": form},
+                status=400,
+            )
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemCancelView(View):
+    """Chủ workspace hủy bài viết có lý do (6.1, B06)."""
+    def post(self, request, workspace_id, package_id, item_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        package = get_package_for_workspace(workspace, package_id)
+        item = get_item_for_workspace(workspace, item_id)
+
+        form = CancelContentItemForm(request.POST)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"cancel_form": form},
+                status=400,
+            )
+
+        reason = form.cleaned_data.get("reason")
+        exp_row = form.cleaned_data.get("expected_row_version")
+
+        try:
+            cancel_content_item(
+                user=request.user,
+                item=item,
+                reason=reason,
+                expected_row_version=exp_row,
+            )
+            messages.success(request, "Đã hủy bài viết thành công!")
+            return redirect("workspaces:item_detail", workspace_id=workspace.id, package_id=package.id, item_id=item.id)
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"cancel_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"cancel_form": form},
+                status=400,
+            )
 
 @method_decorator(login_required, name="dispatch")
 class ContentItemDetailView(View):

@@ -39,8 +39,42 @@
     <div class="alert" style="background: #fff7ed; border: 1px solid #f97316; color: #c2410c; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
       <strong>⚠️ Bài viết đang bị chặn:</strong> {{ item.blocked_reason }}
       {% if item.blocked_by %}<br><small>Báo bởi: {{ item.blocked_by.username }} lúc {{ item.blocked_at|date:"H:i d/m/Y" }}</small>{% endif %}
+      {% if is_owner or can_write or can_edit %}
+        <div style="margin-top: 8px;">
+          <form method="post" action="{% url 'workspaces:item_unblock' workspace.id package.id item.id %}" style="display: inline-block;">
+            {% csrf_token %}
+            <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+            <input type="text" name="reason" placeholder="Ghi chú giải quyết chặn..." style="padding: 4px 8px; font-size: 13px; border-radius: 4px; border: 1px solid #fdba74;">
+            <button type="submit" class="btn" style="padding: 4px 10px; font-size: 13px; background: #ea580c; color: white;" onclick="return confirm('Xác nhận gỡ chặn bài viết?');">
+              ✓ Gỡ chặn
+            </button>
+          </form>
+        </div>
+      {% endif %}
     </div>
+  {% else %}
+    {% if item.state != "CANCELLED" and item.state != "PUBLISHED" %}
+      <div style="margin-bottom: 16px; text-align: right;">
+        <button type="button" class="btn" style="font-size: 12px; color: #c2410c; border: 1px solid #fed7aa;" onclick="document.getElementById('blockFormBox').style.display = document.getElementById('blockFormBox').style.display === 'none' ? 'block' : 'none';">
+          ⚠️ Báo bài bị chặn (Blocker)
+        </button>
+      </div>
+    {% endif %}
   {% endif %}
+
+  <div id="blockFormBox" style="display: none; background: #fff7ed; border: 1px solid #fdba74; padding: 14px; border-radius: 6px; margin-bottom: 20px;">
+    <h4 style="margin: 0 0 8px 0; color: #9a3412;">Báo bài viết bị chặn (Blocker)</h4>
+    <form method="post" action="{% url 'workspaces:item_block' workspace.id package.id item.id %}">
+      {% csrf_token %}
+      <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+      <div class="form-group" style="margin-bottom: 10px;">
+        <textarea name="reason" class="form-control" rows="2" placeholder="Nêu rõ lý do và người cần xử lý..." required></textarea>
+      </div>
+      <button type="submit" class="btn" style="background: #ea580c; color: white; font-size: 13px;" onclick="return confirm('Xác nhận báo bài viết bị chặn?');">
+        Gửi báo chặn
+      </button>
+    </form>
+  </div>
 
   <!-- Brief Box with One-Click Copy -->
   <div class="card" style="margin-bottom: 20px;">
@@ -247,20 +281,165 @@
     {% if item.state == "OWNER_REVIEW" %}
       <div style="background: #faf5ff; border: 1px solid #d8b4fe; padding: 16px; border-radius: 6px;">
         <h4 style="margin: 0 0 8px 0; color: #6b21a8;">Đang chờ Chủ workspace phê duyệt (OWNER_REVIEW)</h4>
-        <p style="margin: 0; font-size: 14px;">Biên tập viên đã hoàn thành checklist và chuyển bài cho Chủ xem xét (Công đoạn B06).</p>
+        <p style="margin: 0 0 16px 0; font-size: 14px;">Biên tập viên đã hoàn thành checklist và nộp bài. Chủ xem xét phiên bản mới nhất <strong>v{{ item.latest_version.version_no }}</strong>.</p>
+
+        {% if is_owner %}
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
+            <!-- PHÊ DUYỆT -->
+            <div style="background: white; border: 1px solid #a855f7; border-radius: 6px; padding: 14px;">
+              <h5 style="margin: 0 0 8px 0; color: #6b21a8;">1. Phê duyệt phiên bản v{{ item.latest_version.version_no }}</h5>
+              <p style="font-size: 13px; color: #6b7280; margin-bottom: 12px;">Duyệt chốt nội dung này để chuyển sang bước Chờ đăng (READY_TO_PUBLISH).</p>
+              <form method="post" action="{% url 'workspaces:item_owner_approve' workspace.id package.id item.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="expected_version_id" value="{{ item.latest_version_id }}">
+                <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+                <input type="hidden" name="idempotency_key" value="approve_{{ item.id }}_{{ item.latest_version_id }}">
+                <button type="submit" class="btn btn-primary" style="background: #7c3aed; border-color: #7c3aed;" onclick="return confirm('Xác nhận phê duyệt phiên bản v{{ item.latest_version.version_no }} của bài viết này?');">
+                  ✅ Duyệt bài viết (Chuyển READY_TO_PUBLISH)
+                </button>
+              </form>
+            </div>
+
+            <!-- YÊU CẦU SỬA -->
+            <div style="background: white; border: 1px solid #fbbf24; border-radius: 6px; padding: 14px;">
+              <h5 style="margin: 0 0 8px 0; color: #b45309;">2. Yêu cầu sửa lại (Trả bước)</h5>
+              <form method="post" action="{% url 'workspaces:item_owner_request_changes' workspace.id package.id item.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+                <div class="form-group" style="margin-bottom: 10px;">
+                  <label style="font-size: 13px; font-weight: 500;">Trả về công đoạn:</label>
+                  <select name="return_stage" class="form-control" style="font-size: 13px;">
+                    <option value="WRITING">Người viết (WRITING)</option>
+                    <option value="EDITING">Người biên tập (EDITING)</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 10px;">
+                  <label style="font-size: 13px; font-weight: 500;">Lý do / Chỉ đạo:</label>
+                  <textarea name="reason" class="form-control" rows="2" placeholder="Chỉ rõ các điểm cần sửa..." required></textarea>
+                </div>
+                <button type="submit" class="btn" style="color: #b45309; border: 1px solid #fbbf24;" onclick="return confirm('Xác nhận trả bài yêu cầu sửa?');">
+                  ↩ Yêu cầu sửa lại
+                </button>
+              </form>
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- RÚT GỬI DUYỆT (Biên tập hoặc Chủ) -->
+        {% if can_edit %}
+          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d8b4fe;">
+            <details>
+              <summary style="font-size: 13px; color: #6b21a8; cursor: pointer;">Rút bài khỏi hàng chờ duyệt (Trả về EDITING)</summary>
+              <form method="post" action="{% url 'workspaces:item_withdraw_review' workspace.id package.id item.id %}" style="margin-top: 8px;">
+                {% csrf_token %}
+                <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+                <div class="form-group" style="margin-bottom: 8px;">
+                  <textarea name="reason" class="form-control" rows="2" placeholder="Lý do rút gửi duyệt..." required></textarea>
+                </div>
+                <button type="submit" class="btn" style="font-size: 13px; color: #6b21a8;" onclick="return confirm('Xác nhận rút bài khỏi hàng đợi phê duyệt?');">
+                  Rút gửi duyệt
+                </button>
+              </form>
+            </details>
+          </div>
+        {% endif %}
       </div>
+
     {% elif item.state == "READY_TO_PUBLISH" %}
       <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 16px; border-radius: 6px;">
         <h4 style="margin: 0 0 8px 0; color: #166534;">Sẵn sàng đăng bài (READY_TO_PUBLISH)</h4>
-        <p style="margin: 0; font-size: 14px;">Chủ workspace đã phê duyệt nội dung. Người xuất bản chuẩn bị đăng lên kênh (Công đoạn B07).</p>
+        <p style="margin: 0 0 12px 0; font-size: 14px;">Chủ workspace đã phê duyệt nội dung phiên bản <strong>v{{ active_approval.version.version_no }}</strong>. Người xuất bản chuẩn bị đăng lên kênh (Công đoạn B07).</p>
+        {% if is_owner %}
+          <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+            <details>
+              <summary style="font-size: 13px; color: #166534; cursor: pointer;">🔄 Mở lại bài viết (Thu hồi duyệt)</summary>
+              <form method="post" action="{% url 'workspaces:item_reopen' workspace.id package.id item.id %}" style="margin-top: 8px;">
+                {% csrf_token %}
+                <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+                <textarea name="reason" class="form-control" rows="2" placeholder="Lý do mở lại bài viết..." required></textarea>
+                <button type="submit" class="btn" style="margin-top: 6px; font-size: 13px; color: #b45309;" onclick="return confirm('Mở lại bài viết sẽ vô hiệu hóa quyết định phê duyệt hiện tại và đưa bài về bước Biên tập. Tiếp tục?');">
+                  Xác nhận mở lại bài
+                </button>
+              </form>
+            </details>
+          </div>
+        {% endif %}
       </div>
+
     {% elif item.state == "PUBLISHED" %}
       <div style="background: #ecfdf5; border: 1px solid #10b981; padding: 16px; border-radius: 6px;">
         <h4 style="margin: 0 0 8px 0; color: #047857;">Bài viết đã xuất bản (PUBLISHED)</h4>
+        <p style="margin: 0 0 12px 0; font-size: 14px;">Bài viết đã được đăng theo bản duyệt v{{ active_approval.version.version_no }}.</p>
+        {% if is_owner %}
+          <details>
+            <summary style="font-size: 13px; color: #047857; cursor: pointer;">🔄 Mở lại bài đã đăng để chỉnh sửa</summary>
+            <form method="post" action="{% url 'workspaces:item_reopen' workspace.id package.id item.id %}" style="margin-top: 8px;">
+              {% csrf_token %}
+              <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+              <textarea name="reason" class="form-control" rows="2" placeholder="Lý do mở lại bài đã đăng..." required></textarea>
+              <button type="submit" class="btn" style="margin-top: 6px; font-size: 13px; color: #b45309;" onclick="return confirm('Mở lại bài đã đăng sẽ đưa bài về bước Biên tập và mở lại tiến độ gói. Tiếp tục?');">
+                Xác nhận mở lại bài
+              </button>
+            </form>
+          </details>
+        {% endif %}
+      </div>
+
+    {% elif item.state == "CANCELLED" %}
+      <div style="background: #fef2f2; border: 1px solid #f87171; padding: 16px; border-radius: 6px;">
+        <h4 style="margin: 0 0 8px 0; color: #991b1b;">Bài viết đã bị hủy (CANCELLED)</h4>
+        <p style="margin: 0; font-size: 14px;">Bài viết đã kết thúc ở trạng thái đã hủy theo lệnh của Chủ workspace.</p>
+      </div>
+    {% endif %}
+
+    <!-- NÚT HỦY BÀI VIẾT CHO CHỦ WORKSPACE (Spec 6.1) -->
+    {% if is_owner and item.state != "CANCELLED" and item.state != "PUBLISHED" %}
+      <div style="margin-top: 16px; text-align: right;">
+        <details>
+          <summary style="font-size: 12px; color: #dc2626; cursor: pointer;">❌ Hủy bài viết này</summary>
+          <form method="post" action="{% url 'workspaces:item_cancel' workspace.id package.id item.id %}" style="margin-top: 8px; text-align: left; background: #fff5f5; padding: 12px; border-radius: 6px; border: 1px solid #fecaca;">
+            {% csrf_token %}
+            <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
+            <div class="form-group" style="margin-bottom: 8px;">
+              <label style="font-size: 13px; font-weight: 500; color: #991b1b;">Lý do hủy bài viết:</label>
+              <textarea name="reason" class="form-control" rows="2" placeholder="Nêu lý do hủy bài..." required></textarea>
+            </div>
+            <button type="submit" class="btn" style="background: #dc2626; color: white; font-size: 13px;" onclick="return confirm('Hủy bài viết là hành động không thể hoàn tác. Bạn có chắc chắn muốn hủy?');">
+              Xác nhận hủy bài viết
+            </button>
+          </form>
+        </details>
       </div>
     {% endif %}
   </div>
 
+  <!-- LỊCH SỬ PHÊ DUYỆT (CONTENT APPROVALS - B06) -->
+  {% if approvals %}
+    <div class="card" style="margin-bottom: 24px;">
+      <h3 style="margin-top: 0; margin-bottom: 16px;">Lịch sử phê duyệt của Chủ ({{ approvals.count }})</h3>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        {% for app in approvals %}
+          <div style="border-left: 3px solid {% if app.is_active %}#10b981{% else %}#9ca3af{% endif %}; padding: 10px 14px; background: {% if app.is_active %}#f0fdf4{% else %}#f9fafb{% endif %}; border-radius: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong>Phiên bản v{{ app.version.version_no }}</strong>
+                {% if app.is_active %}
+                  <span class="badge" style="background: #dcfce7; color: #166534; font-size: 11px;">Đang có hiệu lực</span>
+                {% else %}
+                  <span class="badge" style="background: #f3f4f6; color: #6b7280; font-size: 11px;">Đã vô hiệu lúc {{ app.invalidated_at|date:"H:i d/m/Y" }}</span>
+                {% endif %}
+              </div>
+              <span class="muted" style="font-size: 12px;">Duyệt lúc {{ app.approved_at|date:"H:i d/m/Y" }}</span>
+            </div>
+            <p class="muted" style="margin: 4px 0 0 0; font-size: 13px;">Người duyệt: <strong>{{ app.approved_by.username }}</strong></p>
+            {% if app.invalidation_reason %}
+              <p style="margin: 4px 0 0 0; font-size: 12px; color: #991b1b;"><strong>Lý do vô hiệu:</strong> {{ app.invalidation_reason }}</p>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
   <!-- LỊCH SỬ CÁC PHIÊN BẢN (CONTENT VERSIONS) -->
   <div class="card" style="margin-bottom: 24px;">
     <h3 style="margin-top: 0; margin-bottom: 16px;">Lịch sử các phiên bản nội dung ({{ versions.count }})</h3>

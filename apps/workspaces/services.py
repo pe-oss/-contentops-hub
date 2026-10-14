@@ -7,7 +7,7 @@ from django.db import transaction
 
 from .models import (
     AccessRole, BrandProfile, ContentItem, ContentItemState, ContentVersion,
-    EmploymentType, Membership, MembershipStatus, Package, PackageStatus,
+    ContentApproval, EmploymentType, Membership, MembershipStatus, Package, PackageStatus,
     PlanApproval, ReviewDecision, Task, TaskExecutionMode, TaskRole, TaskStatus,
     Workspace, validate_timezone,
 )
@@ -1163,6 +1163,18 @@ def _check_editor_access(user: Any, item: ContentItem) -> Membership:
     return user_membership
 
 
+def _check_owner_access(user: Any, item: ContentItem) -> Membership:
+    """Kiểm tra quyền Chủ workspace (ACTIVE membership)."""
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+    user_membership = get_active_membership(user, item.workspace)
+    if not user_membership or not user_membership.is_active:
+        raise PermissionDenied("Không có quyền truy cập.")
+    if user_membership.access_role != AccessRole.OWNER:
+        raise PermissionDenied("Chỉ Chủ workspace mới có quyền thực hiện thao tác này.")
+    return user_membership
+
+
 def _verify_row_version(current_version: int, expected_row_version: Any) -> None:
     """Kiểm tra phiên bản dòng (Optimistic Concurrency Control - AC10)."""
     if expected_row_version is not None and str(expected_row_version).strip() != "":
@@ -1432,6 +1444,518 @@ def request_changes_decision(
         edit_task.save(update_fields=["status", "updated_at"])
 
     return decision, locked_item
+
+
+def _sync_package_status(package_id: uuid.UUID) -> Package:
+    """
+    Cập nhật trạng thái của Gói nội dung theo Spec 6.2:
+    - ACTIVE tự thành COMPLETED khi có ít nhất một bài không hủy và tất cả bài không hủy đã PUBLISHED.
+    - Mở lại bài làm gói COMPLETED trở lại ACTIVE.
+    - Lưu ý: Chỉ áp dụng khi gói đang ACTIVE hoặc COMPLETED.
+    """
+    locked_pkg = Package.objects.select_for_update().get(id=package_id)
+    if locked_pkg.status not in (PackageStatus.ACTIVE, PackageStatus.COMPLETED):
+        return locked_pkg
+
+    items = ContentItem.objects.filter(package=locked_pkg)
+    non_cancelled = items.exclude(state=ContentItemState.CANCELLED)
+    non_cancelled_count = non_cancelled.count()
+
+    if non_cancelled_count > 0:
+        all_published = all(it.state == ContentItemState.PUBLISHED for it in non_cancelled)
+        if all_published:
+            if locked_pkg.status != PackageStatus.COMPLETED:
+                locked_pkg.status = PackageStatus.COMPLETED
+                locked_pkg.row_version += 1
+                locked_pkg.save(update_fields=["status", "row_version", "updated_at"])
+        else:
+            if locked_pkg.status == PackageStatus.COMPLETED:
+                locked_pkg.status = PackageStatus.ACTIVE
+                locked_pkg.row_version += 1
+                locked_pkg.save(update_fields=["status", "row_version", "updated_at"])
+    return locked_pkg
+
+
+@transaction.atomic
+def owner_approve_item(
+    *,
+    user: Any,
+    item: ContentItem,
+    expected_version_id: uuid.UUID | str | None = None,
+    expected_row_version: Any = None,
+    idempotency_key: str | None = None,
+) -> tuple[ContentApproval, ContentItem]:
+    """
+    Chủ workspace phê duyệt bài viết (Spec F05, 6.1, 6.3, AC07, AC10, AC12, B06):
+    - Chỉ Chủ workspace mới có quyền phê duyệt (AccessRole.OWNER, ACTIVE membership).
+    - Bài viết phải ở trạng thái OWNER_REVIEW.
+    - Bài viết không được ở trạng thái BLOCKED (AC12).
+    - Phiên bản được xem xét (expected_version_id) phải khớp với latest_version_id của bài viết (AC07).
+      Nếu màn hình client xem v1 mà bài đã chuyển sang v2 hoặc version khác -> Bị từ chối ConcurrencyConflictError (HTTP 409).
+    - Kiểm tra Optimistic Concurrency Control (AC10) trên row_version của bài.
+    - Chống nhấp đôi qua idempotency_key (AC05/B06).
+    - Vô hiệu hóa bất kỳ phê duyệt cũ nào còn hiệu lực trước đó (Spec 9).
+    - Tạo bản ghi ContentApproval trỏ version_id đã chốt, approved_by, approved_at.
+    - Chuyển trạng thái ContentItem: OWNER_REVIEW -> READY_TO_PUBLISH, lưu approval_id.
+    - Cập nhật Task PUBLISH: chuyển trạng thái sang READY (mở việc xuất bản - Spec 6.2).
+    - Ghi lịch sử ReviewDecision với decision="APPROVE".
+    """
+    _check_owner_access(user, item)
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+
+    clean_idemp = (idempotency_key or "").strip()
+    if clean_idemp:
+        existing_approval = ContentApproval.objects.filter(
+            item=locked_item, idempotency_key=clean_idemp
+        ).first()
+        if existing_approval:
+            return existing_approval, locked_item
+
+    if locked_item.is_blocked:
+        raise ValidationError(f"Bài viết đang bị chặn vì lý do: '{locked_item.blocked_reason}'.")
+
+    if locked_item.state != ContentItemState.OWNER_REVIEW:
+        raise ValidationError(
+            f"Chỉ có thể phê duyệt khi bài viết đang ở trạng thái Chờ Chủ duyệt (OWNER_REVIEW). Trạng thái hiện tại: '{locked_item.get_state_display()}'."
+        )
+
+    if not locked_item.latest_version_id:
+        raise ValidationError("Bài viết chưa có phiên bản nội dung nào để phê duyệt.")
+
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    # AC07: Client đang xem phiên bản nào? Nếu client gửi expected_version_id mà không khớp latest_version_id -> ConcurrencyConflictError (409)
+    if expected_version_id:
+        try:
+            if isinstance(expected_version_id, str):
+                exp_ver_uuid = uuid.UUID(expected_version_id)
+            else:
+                exp_ver_uuid = expected_version_id
+        except (ValueError, TypeError):
+            exp_ver_uuid = None
+
+        if exp_ver_uuid and exp_ver_uuid != locked_item.latest_version_id:
+            raise ConcurrencyConflictError(
+                "Phiên bản nội dung đang xem đã cũ và không phải phiên bản hiện hành mới nhất. Vui lòng tải lại trang để xem xét phiên bản mới nhất."
+            )
+
+    target_version = ContentVersion.objects.get(id=locked_item.latest_version_id)
+
+    # Vô hiệu hóa phê duyệt cũ còn hiệu lực nếu có
+    now = timezone.now()
+    ContentApproval.objects.filter(item=locked_item, invalidated_at__isnull=True).update(
+        invalidated_at=now,
+        invalidation_reason="Được thay thế bởi phê duyệt mới.",
+    )
+
+    # Tạo phê duyệt mới
+    approval = ContentApproval.objects.create(
+        workspace=locked_item.workspace,
+        item=locked_item,
+        version=target_version,
+        approved_by=user,
+        idempotency_key=clean_idemp,
+    )
+
+    # Ghi nhận ReviewDecision append-only
+    actor_membership = get_active_membership(user, locked_item.workspace)
+    ReviewDecision.objects.create(
+        workspace=locked_item.workspace,
+        item=locked_item,
+        version=target_version,
+        decision="APPROVE",
+        actor_membership=actor_membership,
+        idempotency_key=clean_idemp,
+    )
+
+    locked_item.state = ContentItemState.READY_TO_PUBLISH
+    locked_item.approval_id = approval.id
+    locked_item.row_version += 1
+    locked_item.save(update_fields=["state", "approval_id", "row_version", "updated_at"])
+
+    # Mở Task PUBLISH sang READY
+    pub_task = Task.objects.select_for_update().filter(item=locked_item, role=TaskRole.PUBLISH).first()
+    if pub_task and pub_task.status == TaskStatus.WAITING:
+        pub_task.status = TaskStatus.READY
+        pub_task.save(update_fields=["status", "updated_at"])
+
+    return approval, locked_item
+
+
+@transaction.atomic
+def owner_request_changes(
+    *,
+    user: Any,
+    item: ContentItem,
+    return_stage: str,
+    reason: str,
+    expected_row_version: Any = None,
+) -> tuple[ReviewDecision, ContentItem]:
+    """
+    Chủ workspace yêu cầu sửa lại và chỉ định bước trả về (Spec F05, 6.1, 6.2, B06):
+    - Quyền: AccessRole.OWNER.
+    - Trạng thái bài phải là OWNER_REVIEW.
+    - return_stage: "WRITING" hoặc "EDITING".
+    - Bắt buộc có lý do sửa (không để trống).
+    - Nếu trả về "WRITING": bài chuyển sang WRITING; Task WRITE chuyển sang READY; Task EDIT về WAITING.
+    - Nếu trả về "EDITING": bài chuyển sang EDITING; Task EDIT chuyển sang READY.
+    - Ghi nhận ReviewDecision append-only (decision="REQUEST_CHANGES", return_stage, reason).
+    """
+    _check_owner_access(user, item)
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    if locked_item.is_blocked:
+        raise ValidationError(f"Bài viết đang bị chặn vì lý do: '{locked_item.blocked_reason}'.")
+
+    if locked_item.state != ContentItemState.OWNER_REVIEW:
+        raise ValidationError(
+            f"Chỉ có thể yêu cầu sửa khi bài viết đang ở trạng thái Chờ Chủ duyệt (OWNER_REVIEW). Trạng thái hiện tại: '{locked_item.get_state_display()}'."
+        )
+
+    clean_reason = (reason or "").strip()
+    if not clean_reason:
+        raise ValidationError("Yêu cầu chỉnh sửa bắt buộc phải nêu rõ lý do và hướng dẫn cụ thể.")
+
+    clean_stage = (return_stage or "").strip().upper()
+    if clean_stage not in ("WRITING", "EDITING"):
+        raise ValidationError("Công đoạn trả về phải là Viết bài (WRITING) hoặc Biên tập (EDITING).")
+
+    actor_membership = get_active_membership(user, locked_item.workspace)
+    decision = ReviewDecision.objects.create(
+        workspace=locked_item.workspace,
+        item=locked_item,
+        version=locked_item.latest_version,
+        decision="REQUEST_CHANGES",
+        return_stage=clean_stage,
+        reason=clean_reason,
+        actor_membership=actor_membership,
+    )
+
+    if clean_stage == "WRITING":
+        locked_item.state = ContentItemState.WRITING
+        # Mở lại nhiệm vụ viết, đưa nhiệm vụ biên tập về WAITING (Spec 6.2)
+        write_task = Task.objects.select_for_update().filter(item=locked_item, role=TaskRole.WRITE).first()
+        if write_task:
+            write_task.status = TaskStatus.READY
+            write_task.save(update_fields=["status", "updated_at"])
+        edit_task = Task.objects.select_for_update().filter(item=locked_item, role=TaskRole.EDIT).first()
+        if edit_task:
+            edit_task.status = TaskStatus.WAITING
+            edit_task.save(update_fields=["status", "updated_at"])
+    else:
+        locked_item.state = ContentItemState.EDITING
+        # Mở lại nhiệm vụ biên tập (Spec 6.2)
+        edit_task = Task.objects.select_for_update().filter(item=locked_item, role=TaskRole.EDIT).first()
+        if edit_task:
+            edit_task.status = TaskStatus.READY
+            edit_task.save(update_fields=["status", "updated_at"])
+
+    locked_item.row_version += 1
+    locked_item.save(update_fields=["state", "row_version", "updated_at"])
+
+    return decision, locked_item
+
+
+@transaction.atomic
+def withdraw_review(
+    *,
+    user: Any,
+    item: ContentItem,
+    reason: str,
+    expected_row_version: Any = None,
+) -> tuple[ReviewDecision, ContentItem]:
+    """
+    Rút gửi duyệt có lý do (Spec F05, 6.1):
+    - Quyền: Người biên tập được phân công hoặc Chủ workspace.
+    - Trạng thái bài phải là OWNER_REVIEW.
+    - Bắt buộc có lý do rút gửi duyệt.
+    - Chuyển trạng thái: OWNER_REVIEW -> EDITING.
+    - Mở lại Task EDIT: chuyển status sang READY.
+    - Ghi nhận ReviewDecision append-only (decision="WITHDRAW_REVIEW", return_stage="EDITING", reason).
+    """
+    actor_membership = _check_editor_access(user, item)
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    if locked_item.is_blocked:
+        raise ValidationError(f"Bài viết đang bị chặn vì lý do: '{locked_item.blocked_reason}'.")
+
+    if locked_item.state != ContentItemState.OWNER_REVIEW:
+        raise ValidationError(
+            f"Chỉ có thể rút duyệt khi bài viết đang ở trạng thái Chờ Chủ duyệt (OWNER_REVIEW). Trạng thái hiện tại: '{locked_item.get_state_display()}'."
+        )
+
+    clean_reason = (reason or "").strip()
+    if not clean_reason:
+        raise ValidationError("Rút bài gửi duyệt bắt buộc phải cung cấp lý do.")
+
+    decision = ReviewDecision.objects.create(
+        workspace=locked_item.workspace,
+        item=locked_item,
+        version=locked_item.latest_version,
+        decision="WITHDRAW_REVIEW",
+        return_stage="EDITING",
+        reason=clean_reason,
+        actor_membership=actor_membership,
+    )
+
+    locked_item.state = ContentItemState.EDITING
+    locked_item.row_version += 1
+    locked_item.save(update_fields=["state", "row_version", "updated_at"])
+
+    edit_task = Task.objects.select_for_update().filter(item=locked_item, role=TaskRole.EDIT).first()
+    if edit_task:
+        edit_task.status = TaskStatus.READY
+        edit_task.save(update_fields=["status", "updated_at"])
+
+    return decision, locked_item
+
+
+@transaction.atomic
+def reopen_content_item(
+    *,
+    user: Any,
+    item: ContentItem,
+    reason: str,
+    expected_row_version: Any = None,
+) -> tuple[ReviewDecision, ContentItem]:
+    """
+    Chủ workspace mở lại bài viết (Spec F05, F06, 6.1, 6.2, AC09, B06):
+    - Chỉ Chủ workspace mới có quyền mở lại (AccessRole.OWNER).
+    - Áp dụng khi bài viết đang ở READY_TO_PUBLISH hoặc PUBLISHED.
+    - Bắt buộc có lý do mở lại.
+    - Vô hiệu hóa ContentApproval hiện tại: gán invalidated_at và invalidation_reason (AC09).
+    - Xóa approval_id trên ContentItem (approval_id = None).
+    - Chuyển trạng thái ContentItem: -> EDITING.
+    - Nhiệm vụ EDIT chuyển sang READY; nhiệm vụ PUBLISH nếu đang READY chuyển về WAITING.
+    - Nếu gói nội dung đang COMPLETED, tự động chuyển về ACTIVE (Spec 6.2).
+    - Ghi nhận ReviewDecision append-only (decision="REOPEN", return_stage="EDITING", reason).
+    """
+    _check_owner_access(user, item)
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    if locked_item.is_blocked:
+        raise ValidationError(f"Bài viết đang bị chặn vì lý do: '{locked_item.blocked_reason}'.")
+
+    if locked_item.state not in (ContentItemState.READY_TO_PUBLISH, ContentItemState.PUBLISHED):
+        raise ValidationError(
+            f"Chỉ có thể mở lại khi bài viết đang ở trạng thái 'Chờ đăng' (READY_TO_PUBLISH) hoặc 'Đã đăng' (PUBLISHED). Hiện tại: '{locked_item.get_state_display()}'."
+        )
+
+    clean_reason = (reason or "").strip()
+    if not clean_reason:
+        raise ValidationError("Mở lại bài viết bắt buộc phải cung cấp lý do.")
+
+    # AC09: Vô hiệu hóa toàn bộ ContentApproval của bài viết
+    now = timezone.now()
+    ContentApproval.objects.filter(item=locked_item, invalidated_at__isnull=True).update(
+        invalidated_at=now,
+        invalidation_reason=f"Chủ workspace mở lại bài viết với lý do: {clean_reason}",
+    )
+
+    actor_membership = get_active_membership(user, locked_item.workspace)
+    decision = ReviewDecision.objects.create(
+        workspace=locked_item.workspace,
+        item=locked_item,
+        version=locked_item.latest_version,
+        decision="REOPEN",
+        return_stage="EDITING",
+        reason=clean_reason,
+        actor_membership=actor_membership,
+    )
+
+    locked_item.approval_id = None
+    locked_item.state = ContentItemState.EDITING
+    locked_item.row_version += 1
+    locked_item.save(update_fields=["approval_id", "state", "row_version", "updated_at"])
+
+    # Task transitions (Spec 6.2)
+    edit_task = Task.objects.select_for_update().filter(item=locked_item, role=TaskRole.EDIT).first()
+    if edit_task:
+        edit_task.status = TaskStatus.READY
+        edit_task.save(update_fields=["status", "updated_at"])
+
+    pub_task = Task.objects.select_for_update().filter(item=locked_item, role=TaskRole.PUBLISH).first()
+    if pub_task and pub_task.status == TaskStatus.READY:
+        pub_task.status = TaskStatus.WAITING
+        pub_task.save(update_fields=["status", "updated_at"])
+
+    # Spec 6.2: Mở lại bài làm gói COMPLETED trở lại ACTIVE
+    _sync_package_status(locked_item.package_id)
+
+    return decision, locked_item
+
+
+@transaction.atomic
+def cancel_content_item(
+    *,
+    user: Any,
+    item: ContentItem,
+    reason: str,
+    expected_row_version: Any = None,
+) -> tuple[ReviewDecision, ContentItem]:
+    """
+    Chủ workspace hủy bài viết có lý do (Spec 6.1: TODO / WRITING / EDITING / OWNER_REVIEW / READY_TO_PUBLISH -> CANCELLED):
+    - Quyền: Chủ workspace (AccessRole.OWNER).
+    - Trạng thái bài: không cho phép hủy bài đã PUBLISHED hoặc đã CANCELLED.
+    - Bắt buộc có lý do hủy.
+    - Nếu bài đang ở READY_TO_PUBLISH: thu hồi duyệt, vô hiệu hóa ContentApproval (Spec 6.1).
+    - Trạng thái bài chuyển sang CANCELLED.
+    - Tất cả Task chưa hoàn thành (status != DONE) chuyển sang CANCELLED.
+    - Ghi nhận ReviewDecision append-only (decision="CANCEL", reason).
+    """
+    _check_owner_access(user, item)
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    if locked_item.state == ContentItemState.PUBLISHED:
+        raise ValidationError("Không thể hủy bài viết đã xuất bản (PUBLISHED). Để xử lý, hãy mở lại bài viết.")
+
+    if locked_item.state == ContentItemState.CANCELLED:
+        raise ValidationError("Bài viết này đã được hủy trước đó.")
+
+    clean_reason = (reason or "").strip()
+    if not clean_reason:
+        raise ValidationError("Hủy bài viết bắt buộc phải cung cấp lý do.")
+
+    now = timezone.now()
+    # Nếu đang READY_TO_PUBLISH: vô hiệu hóa duyệt (Spec 6.1)
+    if locked_item.state == ContentItemState.READY_TO_PUBLISH:
+        ContentApproval.objects.filter(item=locked_item, invalidated_at__isnull=True).update(
+            invalidated_at=now,
+            invalidation_reason=f"Bài viết bị hủy bởi Chủ workspace: {clean_reason}",
+        )
+        locked_item.approval_id = None
+
+    actor_membership = get_active_membership(user, locked_item.workspace)
+    decision = ReviewDecision.objects.create(
+        workspace=locked_item.workspace,
+        item=locked_item,
+        version=locked_item.latest_version,
+        decision="CANCEL",
+        reason=clean_reason,
+        actor_membership=actor_membership,
+    )
+
+    locked_item.state = ContentItemState.CANCELLED
+    locked_item.row_version += 1
+    locked_item.save(update_fields=["state", "approval_id", "row_version", "updated_at"])
+
+    # Cập nhật các Task chưa DONE sang CANCELLED
+    Task.objects.filter(item=locked_item).exclude(status=TaskStatus.DONE).update(
+        status=TaskStatus.CANCELLED,
+        updated_at=now,
+    )
+
+    # Cập nhật trạng thái gói nếu cần
+    _sync_package_status(locked_item.package_id)
+
+    return decision, locked_item
+
+
+@transaction.atomic
+def block_content_item(
+    *,
+    user: Any,
+    item: ContentItem,
+    reason: str,
+    expected_row_version: Any = None,
+) -> ContentItem:
+    """
+    Báo bài viết bị chặn (Spec F07, 6.1, AC12, B06):
+    - Quyền: Người thực hiện (viết, biên tập, xuất bản) hoặc Chủ workspace (ACTIVE membership).
+    - Bắt buộc có lý do bị chặn.
+    - Ghi nhận blocked_reason, blocked_by=user, blocked_at=now.
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+    membership = get_active_membership(user, item.workspace)
+    if not membership or not membership.is_active:
+        raise PermissionDenied("Không có quyền truy cập.")
+
+    is_assigned = (
+        item.writer_membership_id == membership.id
+        or item.editor_membership_id == membership.id
+        or item.publisher_membership_id == membership.id
+    )
+    if membership.access_role != AccessRole.OWNER and not is_assigned:
+        raise PermissionDenied("Chỉ người được phân công hoặc Chủ workspace mới có thể báo chặn bài viết.")
+
+    clean_reason = (reason or "").strip()
+    if not clean_reason:
+        raise ValidationError("Báo chặn bài viết bắt buộc phải cung cấp lý do.")
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    locked_item.blocked_reason = clean_reason
+    locked_item.blocked_by = user
+    locked_item.blocked_at = timezone.now()
+    locked_item.row_version += 1
+    locked_item.save(update_fields=["blocked_reason", "blocked_by", "blocked_at", "row_version", "updated_at"])
+
+    return locked_item
+
+
+@transaction.atomic
+def unblock_content_item(
+    *,
+    user: Any,
+    item: ContentItem,
+    resolution_note: str = "",
+    expected_row_version: Any = None,
+) -> ContentItem:
+    """
+    Giải quyết và gỡ chặn bài viết (Spec F07, 6.1, AC12, B06):
+    - Quyền: Chủ workspace hoặc người phụ trách công đoạn hiện tại (viết khi WRITING, biên tập khi EDITING...).
+    - Xóa blocked_reason, blocked_by, blocked_at; ghi nhận resolution_note.
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+    membership = get_active_membership(user, item.workspace)
+    if not membership or not membership.is_active:
+        raise PermissionDenied("Không có quyền truy cập.")
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+    if not locked_item.is_blocked:
+        raise ValidationError("Bài viết hiện không ở trạng thái bị chặn.")
+
+    # Kiểm tra người phụ trách bước hiện tại hoặc Chủ
+    is_responsible = False
+    if membership.access_role == AccessRole.OWNER:
+        is_responsible = True
+    elif locked_item.state in (ContentItemState.TODO, ContentItemState.WRITING) and locked_item.writer_membership_id == membership.id:
+        is_responsible = True
+    elif locked_item.state == ContentItemState.EDITING and locked_item.editor_membership_id == membership.id:
+        is_responsible = True
+    elif locked_item.state == ContentItemState.READY_TO_PUBLISH and locked_item.publisher_membership_id == membership.id:
+        is_responsible = True
+
+    if not is_responsible:
+        raise PermissionDenied("Chỉ Chủ workspace hoặc người đang chịu trách nhiệm bước này mới có quyền gỡ chặn.")
+
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    clean_note = (resolution_note or "").strip()
+    locked_item.blocked_reason = ""
+    locked_item.blocked_by = None
+    locked_item.blocked_at = None
+    locked_item.resolution_note = clean_note
+    locked_item.row_version += 1
+    locked_item.save(update_fields=["blocked_reason", "blocked_by", "blocked_at", "resolution_note", "row_version", "updated_at"])
+
+    return locked_item
 
 
 @transaction.atomic

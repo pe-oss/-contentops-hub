@@ -25,6 +25,90 @@ class WorkspaceCreateForm(forms.Form):
         ),
         help_text="Từ 1 đến 100 ký tự. Không được để trống hoặc chỉ có khoảng trắng.",
     )
+
+
+class OwnerApproveItemForm(forms.Form):
+    """Form Chủ workspace phê duyệt bài viết (Spec F05, 6.1, AC07, B06)."""
+    expected_version_id = forms.UUIDField(
+        required=True,
+        widget=forms.HiddenInput(),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+    idempotency_key = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class OwnerRequestChangesForm(forms.Form):
+    """Form Chủ workspace yêu cầu sửa lại (Spec F05, 6.1, B06)."""
+    return_stage = forms.ChoiceField(
+        required=True,
+        choices=[("WRITING", "Trả về người Viết (WRITING)"), ("EDITING", "Trả về người Biên tập (EDITING)")],
+        label="Công đoạn trả về",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    reason = forms.CharField(
+        required=True,
+        label="Lý do và chỉ đạo sửa",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3, "placeholder": "Nêu rõ điểm Chủ chưa ưng ý..."}),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class WithdrawReviewForm(forms.Form):
+    """Form rút gửi duyệt (Spec F05, 6.1, B06)."""
+    reason = forms.CharField(
+        required=True,
+        label="Lý do rút gửi duyệt",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Lý do cần rút bài khỏi hàng đợi duyệt..."}),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class ReopenItemForm(forms.Form):
+    """Form Chủ workspace mở lại bài viết (Spec F05, F06, 6.1, AC09, B06)."""
+    reason = forms.CharField(
+        required=True,
+        label="Lý do mở lại bài viết",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3, "placeholder": "Nêu rõ nguyên nhân cần mở lại bài để chỉnh sửa..."}),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class CancelContentItemForm(forms.Form):
+    """Form Chủ workspace hủy bài viết (Spec 6.1, B06)."""
+    reason = forms.CharField(
+        required=True,
+        label="Lý do hủy bài viết",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3, "placeholder": "Nêu rõ lý do hủy bài viết..."}),
+    )
+    expected_row_version = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+
+class BlockContentItemForm(forms.Form):
+    """Form báo chặn hoặc gỡ chặn bài viết (Spec F07, 6.1, AC12, B06)."""
+    reason = forms.CharField(
+        required=False,
+        label="Lý do báo chặn / Ghi chú giải quyết",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Nhập nguyên nhân chặn hoặc cách đã giải quyết..."}),
+    )
+    expected_row_version = forms.IntegerField(required=False, widget=forms.HiddenInput())
     timezone = forms.ChoiceField(
         choices=COMMON_TIMEZONES,
         initial="Asia/Ho_Chi_Minh",

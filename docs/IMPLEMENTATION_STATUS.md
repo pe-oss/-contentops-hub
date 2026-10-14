@@ -6,7 +6,7 @@
 
 - **Spec cơ sở:** `docs/Spec-Ban-Content-Marketing-v1.0.md` (Phiên bản v1.0).
 - **Mốc xuất phát:** Nhánh `chore/boilerplate-baseline` (commit `4fd4046`).
-- **Nhánh hiện tại:** `feat/b05` (tiếp nối nhánh `feat/b04`, commit `62b8274`).
+- **Nhánh hiện tại:** `feat/b06` (tiếp nối nhánh `feat/b05`, commit `595ffc4`).
 
 | Giai đoạn / Nhiệm vụ | Trạng thái | Ghi chú |
 |---|---|---|
@@ -17,11 +17,77 @@
 | **B03 — Hồ sơ thương hiệu (Brand Profile)** | **HOÀN TẤT** | Spec mục 4, 7 UI02, 9, 10, 13, 14 AC15 (OneToOne unique, validate trường dữ liệu, HTTPS source URLs, auto-increment revision, optimistic concurrency 409, snapshot bất biến) |
 | **B04 — Gói, kế hoạch, phân công (Packages & Planning)** | CHƯA LÀM | Spec mục 4, 5 F02, 9, 13 B04 (Dừng trước B04 theo quy định) |
 | **B05 — Phiên bản và luồng viết/biên tập (Writing/Editing)** | **HOÀN TẤT** | Spec mục 5 F03-F04, 6, 9, 13 B05, 14 AC06/AC08/AC10/AC12 (ContentVersion bất biến, ReviewDecision append-only, Brief copy AI 1-click, Checklist 4 mục, OCC 409, phân quyền, Việc của tôi) |
-| **B06 — Chủ duyệt, mở lại, trạng thái (Approval & Lifecycle)** | CHƯA LÀM | Spec mục 5 F05, 9, 13 B06 |
+| **B06 — Chủ duyệt, mở lại, trạng thái (Approval & Lifecycle)** | **HOÀN TẤT** | Spec mục 5 F05, 6, 9, 13 B06, 14 AC07/AC08/AC09/AC10/AC12 (Chủ duyệt version chốt, ContentApproval append-only & invalidation khi mở lại, stale version 409, phân quyền Chủ, nút rút duyệt, cờ chặn/gỡ chặn blocker, UI05 tác nghiệp hoàn chỉnh) |
 | **B07 — Xuất bản và hoàn thành gói (Publishing)** | CHƯA LÀM | Spec mục 5 F06, 9, 13 B07 |
 | **B08 — Blocker, đổi người, thu hồi (Task Reassignment)** | CHƯA LÀM | Spec mục 6, 9, 13 B08 |
 | **B09 — Tổng quan, Việc của tôi, thông báo (Dashboard & Tasks)** | CHƯA LÀM | Spec mục 7 UI01/UI06, 8, 9, 13 B09 |
 | **B10 — Responsive, lỗi, backup, QA lõi (Core QA)** | CHƯA LÀM | Spec mục 13 B10, 14 AC01-AC18 |
+
+## 10. Chi tiết thực hiện B06 (Chủ duyệt, Mở lại & Vòng đời bài viết)
+
+### 10.1. Mô hình Dữ liệu B06 (`apps/workspaces/models.py`)
+- **`ContentApproval` (Bản ghi phê duyệt bài viết - Spec mục 6.1, 6.3, 9, 13 B06):**
+  - Lưu: `item`, `workspace`, `version` (bản version_id cụ thể được duyệt), `approved_by` (Chủ workspace), `approved_at`, `invalidated_at` (thời điểm bị vô hiệu hóa), `invalidation_reason` (lý do mở lại/hủy bài), `idempotency_key`.
+  - Property `is_active`: `invalidated_at is None`. Mỗi bài viết chỉ có tối đa một approval có hiệu lực (invalidated_at__isnull=True).
+  - Chỉ mục tìm kiếm: `idx_appr_item_inval` (`item`, `invalidated_at`), `idx_appr_ws_approved` (`workspace`, `approved_at`).
+- **Mở rộng `ReviewDecision`:**
+  - Bổ sung các loại quyết định vòng đời: `APPROVE` (Chủ duyệt), `WITHDRAW_REVIEW` (Rút gửi duyệt), `REOPEN` (Mở lại bài viết), `CANCEL` (Hủy bài viết).
+  - Duy trì tính chất append-only bất biến phục vụ audit trail.
+
+### 10.2. Domain Services B06 (`apps/workspaces/services.py`)
+- `owner_approve_item()`:
+  - Chủ workspace phê duyệt bài viết từ trạng thái `OWNER_REVIEW`.
+  - Kiểm tra quyền Chủ workspace (`AccessRole.OWNER`, ACTIVE membership).
+  - Chặn duyệt nếu bài đang bị `BLOCKED` (AC12).
+  - Kiểm tra Optimistic Concurrency Control `row_version` (AC10).
+  - **Kiểm tra phiên bản cũ (AC07):** Nếu `expected_version_id` từ client khác với `latest_version_id` hiện hành của bài viết, lập tức trả về `ConcurrencyConflictError` (HTTP 409 Conflict), chặn duyệt nhầm bản cũ.
+  - Vô hiệu hóa phê duyệt cũ (nếu có), tạo bản ghi `ContentApproval` mới gắn với `version_id` được chốt.
+  - Chuyển trạng thái `ContentItem`: `OWNER_REVIEW` -> `READY_TO_PUBLISH`, cập nhật `approval_id`.
+  - Chuyển nhiệm vụ `TaskRole.PUBLISH` sang `READY` để mở việc xuất bản (Spec 6.2).
+  - Ghi nhận `ReviewDecision` append-only (`decision="APPROVE"`).
+  - Chống nhấp đôi qua `idempotency_key`.
+- `owner_request_changes()`:
+  - Chủ workspace yêu cầu sửa lại kèm chỉ định bước trả về (`WRITING` hoặc `EDITING`). Bắt buộc có lý do sửa cụ thể.
+  - Nếu trả về `WRITING`: bài viết chuyển `WRITING`; Task `WRITE` sang `READY`; Task `EDIT` về `WAITING`.
+  - Nếu trả về `EDITING`: bài viết chuyển `EDITING`; Task `EDIT` sang `READY`.
+  - Ghi nhận `ReviewDecision` append-only.
+- `withdraw_review()`:
+  - Người biên tập được phân công hoặc Chủ workspace rút bài khỏi hàng đợi chờ duyệt.
+  - Chuyển `OWNER_REVIEW` -> `EDITING`; Task `EDIT` mở lại `READY`. Bắt buộc có lý do rút bài.
+- `reopen_content_item()`:
+  - Chủ workspace mở lại bài viết từ `READY_TO_PUBLISH` hoặc `PUBLISHED` (AC09). Bắt buộc có lý do mở lại.
+  - **Vô hiệu hóa toàn bộ `ContentApproval` hiện tại của bài viết (AC09):** ghi nhận `invalidated_at` và `invalidation_reason`.
+  - Xóa `approval_id` trên `ContentItem` về `None`.
+  - Chuyển trạng thái `ContentItem` về `EDITING`; Task `EDIT` sang `READY`; Task `PUBLISH` về `WAITING`.
+  - Tự động đồng bộ trạng thái Gói nội dung: Nếu gói đang `COMPLETED` sẽ chuyển lại thành `ACTIVE` (Spec 6.2).
+- `cancel_content_item()`:
+  - Chủ workspace hủy bài viết có lý do. Không cho phép hủy bài đã `PUBLISHED` hoặc `CANCELLED`.
+  - Thu hồi duyệt nếu bài đang ở `READY_TO_PUBLISH`.
+  - Chuyển tất cả nhiệm vụ chưa hoàn thành sang `CANCELLED`.
+- `block_content_item()` & `unblock_content_item()`:
+  - Đặt và gỡ cờ chặn (Blocker) theo Spec F07 & AC12; lưu vết lý do, người báo chặn, thời điểm và ghi chú giải quyết.
+
+### 10.3. Giao diện & Form tác nghiệp B06 (`templates/workspaces/item_detail.html` - UI05)
+- Bổ sung các khu vực thao tác cho Chủ workspace khi bài ở `OWNER_REVIEW`: Phê duyệt phiên bản chốt (kèm cảnh báo xác nhận), Yêu cầu sửa lại (chọn trả về viết hoặc biên tập).
+- Nút rút bài khỏi chờ duyệt (Biên tập hoặc Chủ).
+- Nút mở lại bài viết (Thu hồi duyệt) khi bài ở `READY_TO_PUBLISH` hoặc `PUBLISHED`.
+- Nút hủy bài viết dành cho Chủ workspace.
+- Bảng thông báo Blocker và nút gỡ chặn trực tiếp khi người có trách nhiệm xử lý xong.
+- Khối lịch sử phê duyệt của Chủ (`approvals`): hiển thị chi tiết trạng thái hiệu lực / vô hiệu hóa, thời điểm và lý do.
+
+### 10.4. Kiểm thử B06 (`core/tests_b06_approval_lifecycle.py`)
+- Bộ kiểm thử gồm 11 tests toàn diện:
+  1. `test_owner_approve_success_lifecycle`: Luồng duyệt chuẩn thành công, sinh ContentApproval, mở Task PUBLISH.
+  2. `test_stale_version_approval_rejected_ac07`: Duyệt trên phiên bản cũ trả về HTTP 409 (AC07).
+  3. `test_reopen_invalidates_approval_and_transitions_ac09`: Mở lại bài viết vô hiệu hóa approval, xóa approval_id, chuyển EDITING (AC09).
+  4. `test_owner_request_changes_to_writing_and_editing`: Chủ trả về viết hoặc biên tập, cập nhật Task đúng quy tắc.
+  5. `test_withdraw_review_lifecycle`: Rút gửi duyệt trả bài về biên tập.
+  6. `test_cancel_content_item_lifecycle`: Hủy bài viết và thu hồi duyệt nếu đang chờ đăng.
+  7. `test_blocked_item_lifecycle_ac12`: Quản lý cờ chặn blocker, từ chối duyệt khi bị chặn, cho phép gỡ chặn (AC12).
+  8. `test_permission_matrix_and_tenant_isolation`: Chặn thành viên duyệt/mở lại (403), chặn outsider và inactive member (404).
+  9. `test_optimistic_concurrency_control_409_ac10`: Xung đột row_version trả về 409 OCC (AC10).
+  10. `test_idempotency_double_click_protection`: Chống double-click bằng idempotency key.
+  11. `test_package_status_sync_on_reopen_spec_6_2`: Mở lại bài làm gói COMPLETED chuyển lại ACTIVE.
 
 ---
 
