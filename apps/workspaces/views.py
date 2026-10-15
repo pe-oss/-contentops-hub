@@ -3,9 +3,11 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.paginator import Paginator
 from django.http import Http404
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import View
@@ -18,16 +20,20 @@ from .forms import (
     WorkspaceInvitationForm,
     WorkspaceUpdateForm,
 )
-from .models import AccessRole, BrandProfile, EmploymentType, Invitation, Membership, MembershipStatus
+from .models import AccessRole, BrandProfile, EmploymentType, Invitation, Membership, MembershipStatus, Notification, Package
 from .selectors import (
     get_brand_profile,
     get_invitation_by_id_for_workspace,
     get_invitation_by_token,
     get_membership_by_id_for_workspace,
+    get_unread_notifications_count,
+    get_user_notifications,
     get_user_workspaces,
+    get_workspace_dashboard_data,
     get_workspace_for_user,
     get_workspace_invitations,
     get_workspace_members,
+    user_has_entity_access,
 )
 from .services import (
     ConcurrencyConflictError,
@@ -94,6 +100,7 @@ class WorkspaceCreateView(View):
 
 @method_decorator(login_required, name="dispatch")
 class WorkspaceDetailView(View):
+    """Màn hình Tổng quan Dashboard (UI01, Spec mục 7 UI01, 8, 13 B09)."""
     def get(self, request, workspace_id):
         # get_workspace_for_user trả về 404 nếu không tồn tại hoặc user không phải thành viên active
         workspace, membership = get_workspace_for_user(request.user, workspace_id)
@@ -101,21 +108,17 @@ class WorkspaceDetailView(View):
         # Cập nhật session active workspace
         request.session["active_workspace_id"] = str(workspace.id)
 
-        # Thống kê thành viên của workspace
+        dashboard_data = get_workspace_dashboard_data(workspace, request.user)
         members_count = Membership.objects.filter(
             workspace=workspace,
             status=MembershipStatus.ACTIVE,
         ).count()
+        dashboard_data["members_count"] = members_count
 
         return render(
             request,
             "workspaces/workspace_detail.html",
-            {
-                "workspace": workspace,
-                "membership": membership,
-                "members_count": members_count,
-                "is_owner": membership.access_role == AccessRole.OWNER,
-            },
+            dashboard_data,
         )
 
 
@@ -1630,11 +1633,29 @@ class ContentItemSubmitReviewView(View):
 
 @method_decorator(login_required, name="dispatch")
 class MyTasksView(View):
-    """Màn hình Việc của tôi (UI06, Spec F03, B05)."""
+    """Màn hình Việc của tôi (UI06, Spec mục 7 UI06, B05, B09)."""
     def get(self, request, workspace_id):
         workspace, membership = get_workspace_for_user(request.user, workspace_id)
         status_filter = request.GET.get("status", "").strip()
-        tasks = get_my_tasks_for_workspace(workspace, request.user, status_filter=status_filter or None)
+        role_filter = request.GET.get("role", "").strip()
+        package_filter = request.GET.get("package", "").strip()
+
+        tasks_qs = get_my_tasks_for_workspace(
+            workspace,
+            request.user,
+            status_filter=status_filter or None,
+            role_filter=role_filter or None,
+            package_id=package_filter or None,
+        )
+
+        paginator = Paginator(tasks_qs, 20)
+        page_number = request.GET.get("page", 1)
+        tasks_page = paginator.get_page(page_number)
+
+        user_packages = Package.objects.filter(
+            workspace=workspace,
+            items__tasks__assignee_membership=membership,
+        ).distinct().order_by("name")
 
         return render(
             request,
@@ -1642,10 +1663,97 @@ class MyTasksView(View):
             {
                 "workspace": workspace,
                 "membership": membership,
-                "tasks": tasks,
+                "tasks": tasks_page,
+                "page_obj": tasks_page,
+                "status_filter": status_filter,
+                "role_filter": role_filter,
+                "package_filter": package_filter,
+                "user_packages": user_packages,
+            },
+        )
+
+
+@method_decorator(login_required, name="dispatch")
+class NotificationListView(View):
+    """Màn hình danh sách thông báo (Spec mục 8, 10, B09)."""
+    def get(self, request, workspace_id=None):
+        workspace = None
+        membership = None
+        if workspace_id:
+            workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        else:
+            from .services import get_current_active_workspace
+            workspace, membership = get_current_active_workspace(request)
+
+        status_filter = request.GET.get("status", "").strip()
+        unread_only = status_filter == "unread"
+        notifications = get_user_notifications(request.user, workspace=workspace, unread_only=unread_only)
+
+        paginator = Paginator(notifications, 20)
+        page_number = request.GET.get("page", 1)
+        page_obj = paginator.get_page(page_number)
+
+        return render(
+            request,
+            "workspaces/notifications.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "notifications": page_obj,
+                "page_obj": page_obj,
                 "status_filter": status_filter,
             },
         )
+
+
+@method_decorator(login_required, name="dispatch")
+class NotificationReadView(View):
+    """Đánh dấu thông báo đã đọc (POST /notifications/{id}/read, Spec mục 8, 10, B09)."""
+    def post(self, request, notification_id):
+        notif = get_object_or_404(Notification, id=notification_id, recipient=request.user)
+
+        # Kiểm tra xem quyền truy cập đối tượng hiện tại còn hiệu lực không
+        if not user_has_entity_access(request.user, notif.workspace, notif.entity_type, notif.entity_id):
+            raise PermissionDenied("Bạn không còn quyền truy cập thông báo này.")
+
+        if not notif.read_at:
+            notif.read_at = timezone.now()
+            notif.save(update_fields=["read_at"])
+
+        next_url = request.POST.get("next") or request.GET.get("next") or notif.target_url
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+            return redirect(next_url)
+
+        if notif.target_url:
+            return redirect(notif.target_url)
+
+        return redirect("workspaces:notification_list")
+
+
+@method_decorator(login_required, name="dispatch")
+class NotificationReadAllView(View):
+    """Đánh dấu tất cả thông báo là đã đọc (Spec mục 8, B09)."""
+    def post(self, request):
+        active_ws_ids = list(Membership.objects.filter(user=request.user, status=MembershipStatus.ACTIVE).values_list("workspace_id", flat=True))
+        if active_ws_ids:
+            Notification.objects.filter(recipient=request.user, workspace_id__in=active_ws_ids, read_at__isnull=True).update(read_at=timezone.now())
+        messages.success(request, "Đã đánh dấu tất cả thông báo là đã đọc.")
+        next_url = request.POST.get("next") or request.META.get("HTTP_REFERER")
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+            return redirect(next_url)
+        return redirect("workspaces:notification_list")
+
+
+@method_decorator(login_required, name="dispatch")
+class MyTasksRedirectView(View):
+    """Điều hướng GET /tasks/mine tới Việc của tôi ở workspace hiện tại (Spec mục 10)."""
+    def get(self, request):
+        from .services import get_current_active_workspace
+        workspace, _ = get_current_active_workspace(request)
+        if workspace:
+            return redirect("workspaces:my_tasks", workspace_id=workspace.id)
+        return redirect("workspaces:list")
+
 @method_decorator(login_required, name="dispatch")
 class PackageListView(View):
     def get(self, request, workspace_id):

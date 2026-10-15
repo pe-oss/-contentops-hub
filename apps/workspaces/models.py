@@ -1363,4 +1363,111 @@ class AssignmentHistory(models.Model):
         super().save(*args, **kwargs)
 
 
+class NotificationEventType(models.TextChoices):
+    ASSIGNMENT = "ASSIGNMENT", "Giao việc / Đổi người"
+    REVIEW_REQUEST = "REVIEW_REQUEST", "Bài chờ duyệt"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED", "Yêu cầu sửa"
+    BLOCKED = "BLOCKED", "Có blocker hướng tới bạn"
+    UNBLOCKED = "UNBLOCKED", "Blocker đã được giải quyết"
+
+
+class Notification(models.Model):
+    """
+    Hộp thông báo trong ứng dụng (In-app Notification - Spec mục 8, 9, 10, 13 B09):
+    - Người nhận: recipient (User).
+    - Không gửi thông báo cho chính người thực hiện thao tác (actor).
+    - Khóa định danh sự kiện: event_id (chống duplicate / idempotency).
+    - Ràng buộc: unique(recipient_id, event_id).
+    - Các sự kiện:
+      1. Giao/đổi việc (ASSIGNMENT)
+      2. Bài chờ duyệt (REVIEW_REQUEST)
+      3. Yêu cầu sửa (CHANGES_REQUESTED)
+      4. Blocker hướng tới mình (BLOCKED)
+      5. Blocker được giải quyết (UNBLOCKED)
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+        verbose_name="Workspace",
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="workspace_notifications",
+        verbose_name="Người nhận",
+    )
+    event_id = models.CharField(
+        max_length=150,
+        verbose_name="Mã sự kiện duy nhất (Idempotency Key)",
+    )
+    event_type = models.CharField(
+        max_length=50,
+        choices=NotificationEventType.choices,
+        verbose_name="Loại sự kiện",
+    )
+    entity_type = models.CharField(
+        max_length=50,
+        default="CONTENT_ITEM",
+        verbose_name="Loại đối tượng liên quan",
+    )
+    entity_id = models.UUIDField(
+        verbose_name="Mã đối tượng liên quan (UUID)",
+    )
+    title = models.CharField(
+        max_length=255,
+        verbose_name="Tiêu đề thông báo",
+    )
+    message = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Nội dung thông báo",
+    )
+    target_url = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="Đường dẫn đích",
+    )
+    read_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Thời điểm đã đọc",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="Thời điểm tạo",
+    )
+
+    class Meta:
+        verbose_name = "Thông báo"
+        verbose_name_plural = "Thông báo"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recipient", "event_id"],
+                name="unique_recipient_event",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["recipient", "read_at", "created_at"], name="idx_notif_recip_read"),
+            models.Index(fields=["workspace", "recipient", "created_at"], name="idx_notif_ws_recip"),
+        ]
+
+    def __str__(self) -> str:
+        status_text = "Đã đọc" if self.read_at else "Chưa đọc"
+        return f"[{self.get_event_type_display()}] {self.recipient.username}: {self.title} ({status_text})"
+
+    @property
+    def is_read(self) -> bool:
+        return self.read_at is not None
+
+
 

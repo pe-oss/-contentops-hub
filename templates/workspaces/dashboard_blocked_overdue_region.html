@@ -1,0 +1,63 @@
+<!-- VÙNG 2: BỊ CHẶN / TRỄ HẠN (Spec UI01) -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-top: 24px;">
+  <!-- Bị chặn -->
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+      <h3 style="margin: 0; color: #dc2626; display: flex; align-items: center; gap: 8px;">
+        <span>⚠️</span>
+        <span>Bị chặn (Blockers)</span>
+      </h3>
+      <span class="badge" style="background: #fee2e2; color: #991b1b; font-size: 11px;">{{ blocked_items|length }}</span>
+    </div>
+
+    {% if blocked_items %}
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        {% for it in blocked_items %}
+          <div style="background: #fef2f2; border: 1px solid #fee2e2; border-radius: 6px; padding: 10px 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <strong><a href="{% url 'workspaces:item_detail' workspace.id it.package_id it.id %}" style="color: #991b1b; text-decoration: none;">{{ it.title }}</a></strong>
+              <a href="{% url 'workspaces:item_detail' workspace.id it.package_id it.id %}" class="btn" style="font-size: 11px; padding: 3px 8px; color: #991b1b; border: 1px solid #fca5a5;">Mở bài →</a>
+            </div>
+            <p style="margin: 4px 0 0 0; font-size: 13px; color: #7f1d1d;"><strong>Lý do:</strong> {{ it.blocked_reason }}</p>
+            <small class="muted" style="display: block; margin-top: 4px; font-size: 12px;">Báo bởi: {{ it.blocked_by.username }} &bull; Gói: {{ it.package.name }}</small>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div style="text-align: center; padding: 24px; color: var(--muted);">
+        <p style="margin: 0;">✓ Không có bài viết nào đang bị chặn.</p>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Trễ hạn -->
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+      <h3 style="margin: 0; color: #d97706; display: flex; align-items: center; gap: 8px;">
+        <span>⏰</span>
+        <span>Trễ hạn (Overdue)</span>
+      </h3>
+      <span class="badge" style="background: #fef3c7; color: #92400e; font-size: 11px;">{{ overdue_items|length }}</span>
+    </div>
+
+    {% if overdue_items %}
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        {% for it in overdue_items %}
+          <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 6px; padding: 10px 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <strong><a href="{% url 'workspaces:item_detail' workspace.id it.package_id it.id %}" style="color: #92400e; text-decoration: none;">{{ it.title }}</a></strong>
+              <a href="{% url 'workspaces:item_detail' workspace.id it.package_id it.id %}" class="btn" style="font-size: 11px; padding: 3px 8px; color: #92400e; border: 1px solid #fcd34d;">Xem →</a>
+            </div>
+            <p style="margin: 4px 0 0 0; font-size: 13px; color: #78350f;">
+              Bước: <strong>{{ it.get_state_display }}</strong> &bull; Gói: {{ it.package.name }}
+            </p>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div style="text-align: center; padding: 24px; color: var(--muted);">
+        <p style="margin: 0;">✓ Không có bài viết nào bị trễ hạn.</p>
+      </div>
+    {% endif %}
+  </div>
+</div>

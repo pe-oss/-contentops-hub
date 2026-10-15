@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Hộp thông báo — SaaS Boilerplate{% endblock %}
+
+{% block content %}
+<section class="dashboard-page" style="max-width: 900px; margin: 0 auto;">
+  <div class="dashboard-header" style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+    <div>
+      {% if workspace %}
+        <p class="eyebrow"><a href="{% url 'workspaces:detail' workspace.id %}">← {{ workspace.name }}</a></p>
+      {% else %}
+        <p class="eyebrow"><a href="{% url 'workspaces:list' %}">← Workspaces</a></p>
+      {% endif %}
+      <h1 style="margin: 0 0 4px 0;">🔔 Thông báo trong ứng dụng</h1>
+      <p class="muted" style="margin: 0;">Theo dõi các sự kiện tác nghiệp: giao việc, bài chờ duyệt, yêu cầu sửa và blocker.</p>
+    </div>
+
+    <div style="display: flex; gap: 8px;">
+      {% if notifications %}
+        <form method="post" action="{% url 'notification_read_all' %}" style="margin: 0;">
+          {% csrf_token %}
+          <button type="submit" class="btn" style="font-size: 13px;">✓ Đánh dấu tất cả đã đọc</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Bộ lọc -->
+  <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">
+    <a href="?{% if workspace %}workspace_id={{ workspace.id }}{% endif %}" class="btn {% if not status_filter %}btn-primary{% endif %}" style="font-size: 13px;">Tất cả</a>
+    <a href="?status=unread{% if workspace %}&workspace_id={{ workspace.id }}{% endif %}" class="btn {% if status_filter == 'unread' %}btn-primary{% endif %}" style="font-size: 13px;">Chưa đọc</a>
+  </div>
+
+  <!-- Danh sách thông báo -->
+  {% if notifications %}
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      {% for n in notifications %}
+        <div class="card" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; {% if not n.is_read %}border-left: 4px solid var(--primary, #3b82f6); background: #fbfdff;{% endif %}">
+          <div style="flex: 1; min-width: 260px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <span class="badge" style="font-size: 11px; background: {% if n.event_type == 'ASSIGNMENT' %}#e0e7ff; color: #3730a3;{% elif n.event_type == 'REVIEW_REQUEST' %}#dbeafe; color: #1e40af;{% elif n.event_type == 'CHANGES_REQUESTED' %}#fef3c7; color: #92400e;{% elif n.event_type == 'BLOCKED' %}#fee2e2; color: #991b1b;{% elif n.event_type == 'UNBLOCKED' %}#d1fae5; color: #065f46;{% else %}#f1f5f9; color: #475569;{% endif %}">
+                {{ n.get_event_type_display }}
+              </span>
+
+              {% if not n.is_read %}
+                <span class="badge" style="background: #ef4444; color: white; font-size: 10px; padding: 2px 6px;">Mới</span>
+              {% endif %}
+
+              <span class="muted" style="font-size: 12px;">{{ n.created_at|date:"H:i d/m/Y" }}</span>
+            </div>
+
+            <h3 style="margin: 0 0 4px 0; font-size: 15px; font-weight: 600;">
+              {% if n.target_url %}
+                <a href="{{ n.target_url }}" style="text-decoration: none; color: inherit;">
+                  {{ n.title }}
+                </a>
+              {% else %}
+                {{ n.title }}
+              {% endif %}
+            </h3>
+
+            {% if n.message %}
+              <p style="margin: 0; font-size: 13px; color: var(--muted); line-height: 1.4;">{{ n.message }}</p>
+            {% endif %}
+
+            <small class="muted" style="display: block; margin-top: 4px; font-size: 11px;">Workspace: <strong>{{ n.workspace.name }}</strong></small>
+          </div>
+
+          <div style="display: flex; gap: 8px; align-items: center;">
+            {% if not n.is_read %}
+              <form method="post" action="{% url 'notification_read' n.id %}" style="margin: 0;">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" class="btn" style="font-size: 12px; padding: 4px 8px;">Đánh dấu đã đọc</button>
+              </form>
+            {% endif %}
+
+            {% if n.target_url %}
+              <form method="post" action="{% url 'notification_read' n.id %}" style="margin: 0;">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ n.target_url }}">
+                <button type="submit" class="btn btn-primary" style="font-size: 12px; padding: 4px 10px;">Xem →</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <!-- Phân trang -->
+    {% if page_obj.has_other_pages %}
+      <div style="display: flex; justify-content: center; gap: 8px; margin-top: 24px; align-items: center;">
+        {% if page_obj.has_previous %}
+          <a href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}" class="btn" style="font-size: 13px;">← Trang trước</a>
+        {% endif %}
+
+        <span style="font-size: 13px; color: var(--muted);">Trang {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} (Tổng: {{ page_obj.paginator.count }})</span>
+
+        {% if page_obj.has_next %}
+          <a href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}" class="btn" style="font-size: 13px;">Trang sau →</a>
+        {% endif %}
+      </div>
+    {% endif %}
+
+  {% else %}
+    <div class="card" style="text-align: center; padding: 48px 20px;">
+      <p class="muted" style="margin-bottom: 0; font-size: 15px;">✨ Bạn không có thông báo nào trong danh mục này.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,59 @@
+<div class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; {% if t.item.is_blocked %}border-left: 4px solid #ef4444; background: #fffdfd;{% elif t.is_overdue %}border-left: 4px solid #f59e0b;{% elif t.status == 'READY' %}border-left: 4px solid #3b82f6;{% endif %}">
+  <div style="flex: 1; min-width: 260px;">
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+      <span class="badge" style="font-size: 11px;">{{ t.get_role_display }}</span>
+      <span class="badge" style="font-size: 11px; background: {% if t.status == 'READY' %}#3b82f6; color: white;{% elif t.status == 'IN_PROGRESS' %}#8b5cf6; color: white;{% elif t.status == 'DONE' %}#10b981; color: white;{% elif t.status == 'WAITING' %}#e2e8f0; color: #475569;{% else %}#f1f5f9; color: #64748b;{% endif %}">
+        {{ t.get_status_display }}
+      </span>
+
+      {% if t.item.is_blocked %}
+        <span class="badge" style="background: #ef4444; color: white; font-size: 11px;">⚠️ Bị chặn (Blocker)</span>
+      {% endif %}
+
+      {% if t.is_overdue %}
+        <span class="badge" style="background: #f59e0b; color: white; font-size: 11px;">⏰ Trễ hạn</span>
+      {% endif %}
+    </div>
+
+    <h3 style="margin: 0 0 6px 0; font-size: 16px;">
+      <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" style="text-decoration: none; color: inherit;">
+        {{ t.item.title }}
+      </a>
+    </h3>
+
+    {% if t.item.is_blocked and t.item.blocked_reason %}
+      <p style="margin: 0 0 6px 0; font-size: 12px; color: #dc2626; background: #fef2f2; padding: 4px 8px; border-radius: 4px; display: inline-block;">
+        <strong>Lý do chặn:</strong> {{ t.item.blocked_reason }}
+      </p>
+    {% endif %}
+
+    <p class="muted" style="margin: 0; font-size: 13px;">
+      Gói: <strong>{{ t.item.package.name }}</strong> &bull;
+      Hạn: <strong>{{ t.due_at|date:"H:i d/m/Y" }}</strong>
+    </p>
+  </div>
+
+  <div>
+    {% if t.status == 'WAITING' %}
+      <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="btn" style="font-size: 13px; color: var(--muted);" title="Nhiệm vụ đang chờ bước trước hoàn thành">
+        Xem chi tiết
+      </a>
+    {% elif t.status == 'READY' %}
+      <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="btn btn-primary" style="font-size: 13px;">
+        Bắt đầu làm →
+      </a>
+    {% elif t.status == 'IN_PROGRESS' %}
+      <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="btn btn-primary" style="font-size: 13px; background: #7c3aed;">
+        Tiếp tục làm →
+      </a>
+    {% elif t.status == 'DONE' %}
+      <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="btn" style="font-size: 13px;">
+        Xem lại
+      </a>
+    {% else %}
+      <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="btn" style="font-size: 13px;">
+        Chi tiết
+      </a>
+    {% endif %}
+  </div>
+</div>

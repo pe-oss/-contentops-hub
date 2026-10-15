@@ -1,0 +1,73 @@
+<!-- VÙNG 1: CẦN QUYẾT ĐỊNH (Spec UI01) -->
+<div class="card" style="margin-top: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+    <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+      <span>🎯</span>
+      <span>Vùng 1: Cần quyết định</span>
+    </h3>
+    {% if is_owner %}
+      <span class="badge" style="background: #dbeafe; color: #1e40af; font-size: 11px;">Chủ duyệt kế hoạch &amp; nội dung</span>
+    {% endif %}
+  </div>
+
+  <!-- Kế hoạch gói chờ duyệt (Chỉ Chủ) -->
+  {% if is_owner and draft_packages %}
+    <div style="margin-bottom: 16px;">
+      <h4 style="margin: 0 0 8px 0; color: #92400e; font-size: 14px;">📦 Gói nội dung chờ duyệt kế hoạch:</h4>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        {% for pkg in draft_packages %}
+          <div style="display: flex; justify-content: space-between; align-items: center; background: #fffbeb; border: 1px solid #fef3c7; padding: 10px 14px; border-radius: 6px;">
+            <div>
+              <strong><a href="{% url 'workspaces:package_detail' workspace.id pkg.id %}" style="color: #92400e; text-decoration: none;">{{ pkg.name }}</a></strong>
+              <span class="muted" style="font-size: 13px; margin-left: 8px;">(Điều phối: {{ pkg.coordinator_membership.user.username }})</span>
+            </div>
+            <a href="{% url 'workspaces:package_detail' workspace.id pkg.id %}" class="btn btn-primary" style="font-size: 12px; padding: 4px 10px;">Xem &amp; Duyệt kế hoạch →</a>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- Bài viết chờ duyệt -->
+  {% if items_need_decision %}
+    <div style="margin-bottom: 16px;">
+      <h4 style="margin: 0 0 8px 0; color: #1e40af; font-size: 14px;">📝 Bài viết chờ phê duyệt:</h4>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        {% for it in items_need_decision %}
+          <div style="display: flex; justify-content: space-between; align-items: center; background: #eff6ff; border: 1px solid #dbeafe; padding: 10px 14px; border-radius: 6px;">
+            <div>
+              <strong><a href="{% url 'workspaces:item_detail' workspace.id it.package_id it.id %}" style="color: #1e40af; text-decoration: none;">{{ it.title }}</a></strong>
+              <span class="muted" style="font-size: 13px; margin-left: 8px;">Gói: {{ it.package.name }} | Hạn duyệt: {{ it.review_deadline|date:"H:i d/m/Y" }}</span>
+            </div>
+            <a href="{% url 'workspaces:item_detail' workspace.id it.package_id it.id %}" class="btn btn-primary" style="font-size: 12px; padding: 4px 10px;">Mở bài viết →</a>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- Việc sẵn sàng làm của tôi -->
+  {% if my_ready_tasks %}
+    <div>
+      <h4 style="margin: 0 0 8px 0; color: #065f46; font-size: 14px;">⚡ Nhiệm vụ của bạn sẵn sàng thực hiện:</h4>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        {% for t in my_ready_tasks %}
+          <div style="display: flex; justify-content: space-between; align-items: center; background: #ecfdf5; border: 1px solid #d1fae5; padding: 10px 14px; border-radius: 6px;">
+            <div>
+              <span class="badge" style="font-size: 11px; background: #10b981; color: white;">{{ t.get_role_display }}</span>
+              <strong style="margin-left: 8px;"><a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" style="color: inherit; text-decoration: none;">{{ t.item.title }}</a></strong>
+              <span class="muted" style="font-size: 13px; margin-left: 8px;">(Hạn: {{ t.due_at|date:"H:i d/m/Y" }})</span>
+            </div>
+            <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="btn btn-primary" style="font-size: 12px; padding: 4px 10px;">Thao tác →</a>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% if not draft_packages and not items_need_decision and not my_ready_tasks %}
+    <div style="text-align: center; padding: 24px; color: var(--muted);">
+      <p style="margin: 0;">✨ Hiện không có việc nào cần bạn đưa ra quyết định ngay.</p>
+    </div>
+  {% endif %}
+</div>

@@ -1,0 +1,61 @@
+<!-- VÙNG 3: TIẾN ĐỘ GÓI (Spec UI01, AC14) -->
+<div class="card" style="margin-top: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+    <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+      <span>📊</span>
+      <span>Vùng 3: Tiến độ Gói nội dung</span>
+    </h3>
+    {% if is_owner %}
+      <a href="{% url 'workspaces:package_create' workspace.id %}" class="btn btn-primary" style="font-size: 12px; padding: 4px 10px;">+ Tạo Gói mới</a>
+    {% endif %}
+  </div>
+
+  {% if packages_progress %}
+    <div class="table-wrap">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <thead>
+          <tr style="border-bottom: 2px solid var(--border); text-align: left;">
+            <th style="padding: 10px 8px;">Tên gói</th>
+            <th style="padding: 10px 8px;">Điều phối viên</th>
+            <th style="padding: 10px 8px;">Kênh</th>
+            <th style="padding: 10px 8px;">Trạng thái</th>
+            <th style="padding: 10px 8px;">Tiến độ đã đăng</th>
+            <th style="padding: 10px 8px; text-align: right;">Hành động</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pkg in packages_progress %}
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 10px 8px;">
+                <strong><a href="{% url 'workspaces:package_detail' workspace.id pkg.id %}" style="text-decoration: none; color: inherit;">{{ pkg.name }}</a></strong>
+                {% if pkg.cancelled_items_count > 0 %}
+                  <span class="badge" style="font-size: 11px; background: #fee2e2; color: #991b1b; margin-left: 6px;">{{ pkg.cancelled_items_count }} bài hủy</span>
+                {% endif %}
+              </td>
+              <td style="padding: 10px 8px;">{{ pkg.coordinator_membership.user.username }}</td>
+              <td style="padding: 10px 8px;">{{ pkg.get_channel_display }}</td>
+              <td style="padding: 10px 8px;">
+                <span class="badge" style="font-size: 11px; background: {% if pkg.status == 'ACTIVE' %}#e0e7ff; color: #3730a3;{% elif pkg.status == 'COMPLETED' %}#d1fae5; color: #065f46;{% else %}#f3f4f6; color: #4b5563;{% endif %}">
+                  {{ pkg.get_status_display }}
+                </span>
+              </td>
+              <td style="padding: 10px 8px;">
+                <strong>{{ pkg.progress_display }}</strong>
+              </td>
+              <td style="padding: 10px 8px; text-align: right;">
+                <a href="{% url 'workspaces:package_detail' workspace.id pkg.id %}" class="btn" style="font-size: 12px; padding: 4px 8px;">Chi tiết →</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div style="text-align: center; padding: 32px; color: var(--muted);">
+      <p style="margin-bottom: 12px;">Chưa có Gói nội dung nào trong phạm vi truy cập của bạn.</p>
+      {% if is_owner %}
+        <a href="{% url 'workspaces:package_create' workspace.id %}" class="btn btn-primary">+ Tạo Gói đầu tiên</a>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

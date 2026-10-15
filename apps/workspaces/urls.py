@@ -29,6 +29,10 @@ from .views import (
     PackageCreateView,
     PackageDetailView,
     MyTasksView,
+    MyTasksRedirectView,
+    NotificationListView,
+    NotificationReadView,
+    NotificationReadAllView,
     PackageListView,
     PackageUpdateView,
     WorkspaceCreateView,
@@ -48,6 +52,7 @@ urlpatterns = [
     path("", WorkspaceListView.as_view(), name="list"),
     path("new/", WorkspaceCreateView.as_view(), name="create"),
     path("<uuid:workspace_id>/", WorkspaceDetailView.as_view(), name="detail"),
+    path("<uuid:workspace_id>/dashboard/", WorkspaceDetailView.as_view(), name="dashboard"),
     path("<uuid:workspace_id>/edit/", WorkspaceUpdateView.as_view(), name="edit"),
     path("<uuid:workspace_id>/switch/", WorkspaceSwitchView.as_view(), name="switch"),
     path("<uuid:workspace_id>/brand/", BrandProfileView.as_view(), name="brand_profile"),
@@ -199,6 +204,14 @@ urlpatterns = [
         WorkspaceInvitationResendView.as_view(),
         name="invitation_resend",
     ),
+
+    # Notifications & Tasks (B09)
+    path("<uuid:workspace_id>/notifications/", NotificationListView.as_view(), name="workspace_notifications"),
+    path("notifications/", NotificationListView.as_view(), name="notification_list"),
+    path("notifications/<uuid:notification_id>/read/", NotificationReadView.as_view(), name="notification_read"),
+    path("notifications/read-all/", NotificationReadAllView.as_view(), name="notification_read_all"),
+    path("tasks/mine/", MyTasksRedirectView.as_view(), name="tasks_mine"),
+
     path("invitations/accept/<str:token>/", InvitationAcceptView.as_view(), name="invitation_accept"),
 ]
 

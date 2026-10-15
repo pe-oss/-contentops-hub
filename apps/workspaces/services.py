@@ -3,12 +3,12 @@ from urllib.parse import urlparse
 from typing import Any
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from .models import (
     AccessRole, AssignmentHistory, AssignmentRole, BrandProfile, ContentApproval, ContentItem, ContentItemState, ContentPublication, ContentVersion,
-    EmploymentType, Membership, MembershipStatus, Package, PackageStatus,
+    EmploymentType, Membership, MembershipStatus, Notification, NotificationEventType, Package, PackageStatus,
     PlanApproval, ReviewDecision, Task, TaskExecutionMode, TaskRole, TaskStatus,
     Workspace, validate_timezone,
 )
@@ -35,6 +35,61 @@ def validate_workspace_input(name: str, timezone_str: str) -> tuple[str, str]:
     validate_timezone(clean_tz)
 
     return clean_name, clean_tz
+
+
+def create_notification(
+    *,
+    workspace: Workspace,
+    recipient_user: Any,
+    actor_user: Any,
+    event_id: str,
+    event_type: str,
+    title: str,
+    message: str = "",
+    entity_type: str = "CONTENT_ITEM",
+    entity_id: uuid.UUID | str,
+    target_url: str = "",
+) -> Notification | None:
+    """
+    Tạo thông báo trong ứng dụng (In-app Notification - Spec mục 8, 9, 13 B09):
+    - Không thông báo cho chính người thao tác (actor_user.id == recipient_user.id).
+    - Idempotency theo recipient_id và event_id.
+    - Thực thi trong cùng transaction nghiệp vụ.
+    """
+    if not recipient_user or not getattr(recipient_user, "is_authenticated", False):
+        return None
+    if actor_user and getattr(actor_user, "pk", None) == recipient_user.pk:
+        # Spec mục 8: Không thông báo cho chính người thao tác
+        return None
+
+    if isinstance(entity_id, str):
+        try:
+            entity_id = uuid.UUID(entity_id)
+        except ValueError:
+            pass
+
+    clean_event_id = (event_id or "").strip()
+    if not clean_event_id:
+        clean_event_id = str(uuid.uuid4())
+
+    try:
+        notification, _ = Notification.objects.get_or_create(
+            recipient=recipient_user,
+            event_id=clean_event_id,
+            defaults={
+                "workspace": workspace,
+                "event_type": event_type,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "title": (title or "").strip()[:255],
+                "message": (message or "").strip(),
+                "target_url": (target_url or "").strip()[:500],
+            },
+        )
+        return notification
+    except IntegrityError:
+        return Notification.objects.filter(recipient=recipient_user, event_id=clean_event_id).first()
+
 
 
 @transaction.atomic
@@ -581,6 +636,20 @@ def _reassign_member_responsibilities(
             reassigned_by=user,
             reason=clean_reason,
         )
+
+    create_notification(
+        workspace=workspace,
+        recipient_user=locked_replacement.user,
+        actor_user=user,
+        event_id=f"deact_handover_{target_membership.id}_{workspace.id}",
+        event_type=NotificationEventType.ASSIGNMENT,
+        title=f"Tiếp nhận bàn giao trách nhiệm từ {target_membership.user.username}",
+        message=f"Bạn đã được giao tiếp nhận các nhiệm vụ mở từ {target_membership.user.username}. Lý do: {clean_reason}",
+        entity_type="TASK",
+        entity_id=locked_replacement.id,
+        target_url=f"/workspaces/{workspace.id}/my-tasks/",
+    )
+
 
 
 
@@ -1204,6 +1273,19 @@ def approve_plan(
         ]:
             t, _ = Task.objects.get_or_create(item=item, role=role, defaults=defaults)
             created_tasks.append(t)
+            if t.assignee_membership:
+                create_notification(
+                    workspace=locked_pkg.workspace,
+                    recipient_user=t.assignee_membership.user,
+                    actor_user=user,
+                    event_id=f"plan_approve_task_{t.id}",
+                    event_type=NotificationEventType.ASSIGNMENT,
+                    title=f"Bạn được giao nhiệm vụ {t.get_role_display()} bài viết '{item.title}'",
+                    message=f"Gói '{locked_pkg.name}' đã duyệt kế hoạch. Hạn nhiệm vụ: {t.due_at}.",
+                    entity_type="CONTENT_ITEM",
+                    entity_id=item.id,
+                    target_url=f"/workspaces/{locked_pkg.workspace_id}/packages/{locked_pkg.id}/items/{item.id}/",
+                )
 
     return locked_pkg, approval, created_tasks
 def validate_https_urls(urls: list[str] | None) -> list[str]:
@@ -1465,6 +1547,20 @@ def submit_content_version(
         edit_task.status = TaskStatus.READY
         edit_task.save(update_fields=["status", "updated_at"])
 
+    if locked_item.editor_membership:
+        create_notification(
+            workspace=locked_item.workspace,
+            recipient_user=locked_item.editor_membership.user,
+            actor_user=user,
+            event_id=f"submit_draft_{version.id}",
+            event_type=NotificationEventType.REVIEW_REQUEST,
+            title=f"Bản thảo bài viết '{locked_item.title}' đã sẵn sàng biên tập",
+            message=f"{user.username} đã nộp bản thảo v{version.version_no} cho bài viết '{locked_item.title}'.",
+            entity_type="CONTENT_ITEM",
+            entity_id=locked_item.id,
+            target_url=f"/workspaces/{locked_item.workspace_id}/packages/{locked_item.package_id}/items/{locked_item.id}/",
+        )
+
     return version, locked_item
 
 
@@ -1574,6 +1670,20 @@ def request_changes_decision(
     if edit_task:
         edit_task.status = TaskStatus.WAITING
         edit_task.save(update_fields=["status", "updated_at"])
+
+    if locked_item.writer_membership:
+        create_notification(
+            workspace=locked_item.workspace,
+            recipient_user=locked_item.writer_membership.user,
+            actor_user=user,
+            event_id=f"req_changes_{decision.id}",
+            event_type=NotificationEventType.CHANGES_REQUESTED,
+            title=f"Biên tập viên yêu cầu sửa bài viết '{locked_item.title}'",
+            message=f"Lý do: {clean_reason}",
+            entity_type="CONTENT_ITEM",
+            entity_id=locked_item.id,
+            target_url=f"/workspaces/{locked_item.workspace_id}/packages/{locked_item.package_id}/items/{locked_item.id}/",
+        )
 
     return decision, locked_item
 
@@ -1930,6 +2040,21 @@ def owner_request_changes(
     locked_item.row_version += 1
     locked_item.save(update_fields=["state", "row_version", "updated_at"])
 
+    target_membership = locked_item.writer_membership if clean_stage == "WRITING" else locked_item.editor_membership
+    if target_membership:
+        create_notification(
+            workspace=locked_item.workspace,
+            recipient_user=target_membership.user,
+            actor_user=user,
+            event_id=f"owner_req_changes_{decision.id}",
+            event_type=NotificationEventType.CHANGES_REQUESTED,
+            title=f"Chủ workspace yêu cầu sửa bài viết '{locked_item.title}'",
+            message=f"Bài viết được trả về bước {locked_item.get_state_display()}. Lý do: {clean_reason}",
+            entity_type="CONTENT_ITEM",
+            entity_id=locked_item.id,
+            target_url=f"/workspaces/{locked_item.workspace_id}/packages/{locked_item.package_id}/items/{locked_item.id}/",
+        )
+
     return decision, locked_item
 
 
@@ -2143,6 +2268,7 @@ def block_content_item(
     user: Any,
     item: ContentItem,
     reason: str,
+    resolver_user: Any = None,
     expected_row_version: Any = None,
 ) -> ContentItem:
     """
@@ -2150,6 +2276,7 @@ def block_content_item(
     - Quyền: Người thực hiện (viết, biên tập, xuất bản) hoặc Chủ workspace (ACTIVE membership).
     - Bắt buộc có lý do bị chặn.
     - Ghi nhận blocked_reason, blocked_by=user, blocked_at=now.
+    - Sinh thông báo BLOCKED cho người giải quyết (hoặc điều phối / Chủ) (Spec mục 8, B09).
     """
     if not user or not user.is_authenticated:
         raise PermissionDenied("Yêu cầu đăng nhập.")
@@ -2178,6 +2305,27 @@ def block_content_item(
     locked_item.row_version += 1
     locked_item.save(update_fields=["blocked_reason", "blocked_by", "blocked_at", "row_version", "updated_at"])
 
+    target_user = resolver_user
+    if not target_user:
+        if locked_item.package.coordinator_membership:
+            target_user = locked_item.package.coordinator_membership.user
+        elif locked_item.workspace.owner_user != user:
+            target_user = locked_item.workspace.owner_user
+
+    if target_user:
+        create_notification(
+            workspace=locked_item.workspace,
+            recipient_user=target_user,
+            actor_user=user,
+            event_id=f"blocked_{locked_item.id}_{locked_item.row_version}",
+            event_type=NotificationEventType.BLOCKED,
+            title=f"Bài viết '{locked_item.title}' bị báo chặn (Blocker)",
+            message=f"{user.username} đã báo chặn bài viết. Lý do: {clean_reason}",
+            entity_type="CONTENT_ITEM",
+            entity_id=locked_item.id,
+            target_url=f"/workspaces/{locked_item.workspace_id}/packages/{locked_item.package_id}/items/{locked_item.id}/",
+        )
+
     return locked_item
 
 
@@ -2193,6 +2341,7 @@ def unblock_content_item(
     Giải quyết và gỡ chặn bài viết (Spec F07, 6.1, AC12, B06):
     - Quyền: Chủ workspace hoặc người phụ trách công đoạn hiện tại (viết khi WRITING, biên tập khi EDITING...).
     - Xóa blocked_reason, blocked_by, blocked_at; ghi nhận resolution_note.
+    - Sinh thông báo UNBLOCKED cho người đã báo chặn (Spec mục 8, B09).
     """
     if not user or not user.is_authenticated:
         raise PermissionDenied("Yêu cầu đăng nhập.")
@@ -2220,6 +2369,7 @@ def unblock_content_item(
 
     _verify_row_version(locked_item.row_version, expected_row_version)
 
+    prev_blocked_by = locked_item.blocked_by
     clean_note = (resolution_note or "").strip()
     locked_item.blocked_reason = ""
     locked_item.blocked_by = None
@@ -2227,6 +2377,20 @@ def unblock_content_item(
     locked_item.resolution_note = clean_note
     locked_item.row_version += 1
     locked_item.save(update_fields=["blocked_reason", "blocked_by", "blocked_at", "resolution_note", "row_version", "updated_at"])
+
+    if prev_blocked_by:
+        create_notification(
+            workspace=locked_item.workspace,
+            recipient_user=prev_blocked_by,
+            actor_user=user,
+            event_id=f"unblocked_{locked_item.id}_{locked_item.row_version}",
+            event_type=NotificationEventType.UNBLOCKED,
+            title=f"Blocker trên bài viết '{locked_item.title}' đã được giải quyết",
+            message=f"{user.username} đã gỡ chặn bài viết. Ghi chú giải quyết: {clean_note}",
+            entity_type="CONTENT_ITEM",
+            entity_id=locked_item.id,
+            target_url=f"/workspaces/{locked_item.workspace_id}/packages/{locked_item.package_id}/items/{locked_item.id}/",
+        )
 
     return locked_item
 
@@ -2307,6 +2471,19 @@ def submit_for_owner_review(
     if edit_task:
         edit_task.status = TaskStatus.DONE
         edit_task.save(update_fields=["status", "updated_at"])
+
+    create_notification(
+        workspace=locked_item.workspace,
+        recipient_user=locked_item.workspace.owner_user,
+        actor_user=user,
+        event_id=f"submit_owner_{decision.id}",
+        event_type=NotificationEventType.REVIEW_REQUEST,
+        title=f"Bài viết '{locked_item.title}' đang chờ Chủ workspace phê duyệt",
+        message=f"{user.username} đã gửi bài viết '{locked_item.title}' lên chờ bạn phê duyệt.",
+        entity_type="CONTENT_ITEM",
+        entity_id=locked_item.id,
+        target_url=f"/workspaces/{locked_item.workspace_id}/packages/{locked_item.package_id}/items/{locked_item.id}/",
+    )
 
     return decision, locked_item
 
@@ -2430,6 +2607,19 @@ def reassign_item_assignment(
         reassigned_by=user,
         reason=clean_reason,
         idempotency_key=clean_idemp,
+    )
+
+    create_notification(
+        workspace=locked_item.workspace,
+        recipient_user=locked_new_assignee.user,
+        actor_user=user,
+        event_id=f"reassign_{assignment.id}",
+        event_type=NotificationEventType.ASSIGNMENT,
+        title=f"Bạn được giao phụ trách {assignment.get_role_display()} bài viết '{locked_item.title}'",
+        message=f"Bàn giao từ {prev_assignee.user.username}. Lý do: {clean_reason}",
+        entity_type="CONTENT_ITEM",
+        entity_id=locked_item.id,
+        target_url=f"/workspaces/{locked_item.workspace_id}/packages/{locked_item.package_id}/items/{locked_item.id}/",
     )
 
     return assignment, locked_item

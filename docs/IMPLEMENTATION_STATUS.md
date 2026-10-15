@@ -20,8 +20,79 @@
 | **B06 — Chủ duyệt, mở lại, trạng thái (Approval & Lifecycle)** | **HOÀN TẤT** | Spec mục 5 F05, 6, 9, 13 B06, 14 AC07/AC08/AC09/AC10/AC12 (Chủ duyệt version chốt, ContentApproval append-only & invalidation khi mở lại, stale version 409, phân quyền Chủ, nút rút duyệt, cờ chặn/gỡ chặn blocker, UI05 tác nghiệp hoàn chỉnh) |
 | **B07 — Xuất bản và hoàn thành gói (Publishing)** | **HOÀN TẤT** | Spec mục 5 F06, 6.1, 6.2, 7 UI04, 9, 10, 13 B07, 14 AC12/AC13/AC14 (ContentPublication lưu lịch sử xuất bản có URL, thời điểm, approval/version chốt; Task PUBLISH -> DONE; tự động hoàn thành gói COMPLETED; giữ lịch sử khi mở lại; sửa metadata audit trail; OCC 409 & Idempotency) |
 | **B08 — Blocker, đổi người, thu hồi (Task Reassignment)** | **HOÀN TẤT** | Spec mục 3.1, 3.2, 5 F07, 6.1, 6.2, 6.3, 7 UI03/UI05, 9, 10, 13 B08, 14 AC10, AC11, AC12 (AssignmentHistory append-only audit trail; đồng bộ ContentItem & Task nguyên tử; phân quyền Chủ workspace & Điều phối viên gói; OCC 409 & Idempotency; thu hồi thành viên bắt buộc bàn giao việc mở AC11; bảo vệ Single Owner; bảo toàn blocker AC12) |
-| **B09 — Tổng quan, Việc của tôi, thông báo (Dashboard & Tasks)** | CHƯA LÀM | Spec mục 7 UI01/UI06, 8, 9, 13 B09 |
+| **B09 — Tổng quan, Việc của tôi, thông báo (Dashboard & Tasks)** | **HOÀN TẤT** | Spec mục 7 UI01/UI06, 8, 9, 10, 13 B09 (Dashboard UI01 3 vùng Cần quyết định, Bị chặn/Trễ hạn, Tiến độ gói; Việc của tôi UI06 ưu tiên Blocker > Overdue > Due_at, lọc trạng thái/vai trò/gói, bảo vệ task WAITING, phân trang 20/trang; In-App Notification unique recipient/event_id, rollback-safe, chuông navbar và trang /notifications) |
 | **B10 — Responsive, lỗi, backup, QA lõi (Core QA)** | CHƯA LÀM | Spec mục 13 B10, 14 AC01-AC18 |
+
+
+## 13. Chi tiết thực hiện B09 (Dashboard UI01, Việc của tôi UI06 & Thông báo In-App)
+
+### 13.1. Mô hình Dữ liệu B09 (`apps/workspaces/models.py`)
+- **`NotificationEventType` (Enum sự kiện thông báo):**
+  - `ASSIGNMENT` ("Giao việc / Đổi người"): khi duyệt kế hoạch gói, bàn giao bài viết (B08), hoặc bàn giao việc khi thu hồi thành viên (AC11).
+  - `REVIEW_REQUEST` ("Bài chờ duyệt"): người viết nộp bản nháp cho biên tập, hoặc biên tập nộp bài cho Chủ duyệt.
+  - `CHANGES_REQUESTED` ("Yêu cầu sửa"): biên tập yêu cầu người viết sửa lại, hoặc Chủ yêu cầu sửa trả về viết/biên tập.
+  - `BLOCKED` ("Có blocker hướng tới bạn"): bài viết bị báo chặn kèm lý do.
+  - `UNBLOCKED` ("Blocker đã được giải quyết"): bài viết được giải quyết và gỡ chặn.
+- **`Notification` (Mô hình Thông báo trong ứng dụng - Spec mục 8, 9, 10, 13 B09):**
+  - Trường dữ liệu: `id` (UUID), `workspace`, `recipient` (User), `event_id` (Idempotency key duy nhất), `event_type`, `entity_type` (`CONTENT_ITEM`/`TASK`/`PACKAGE`), `entity_id` (UUID), `title`, `message`, `target_url`, `read_at` (nullable), `created_at`.
+  - Ràng buộc: `UniqueConstraint(fields=["recipient", "event_id"], name="unique_recipient_event")` — bảo đảm chống duplicate thông báo khi retry hoặc double-click.
+  - Chỉ mục: `idx_notif_recip_read`, `idx_notif_ws_recip`.
+  - Migration: `apps/workspaces/migrations/0011_notification.py`.
+  - Quản trị: `apps/workspaces/admin.py` (`NotificationAdmin`).
+
+### 13.2. Nghiệp vụ Domain, Bộ chọn & Lọc Quyền B09
+- **`create_notification()` (`apps/workspaces/services.py`):**
+  - Quy tắc cốt lõi Spec mục 8: *"Không thông báo cho chính người thao tác"* (`actor.pk == recipient.pk` tự động bỏ qua).
+  - Thực thi nguyên tử trong transaction nghiệp vụ; nếu transaction rollback do lỗi/validation, không để lại thông báo rác trong CSDL.
+  - Tích hợp tự động vào: `approve_plan`, `reassign_item_assignment`, `_reassign_member_responsibilities`, `submit_content_version`, `submit_for_owner_review`, `request_changes_decision`, `owner_request_changes`, `block_content_item`, `unblock_content_item`.
+- **`get_workspace_dashboard_data()` (`apps/workspaces/selectors.py`):**
+  - **Vùng 1: Cần quyết định:** Kế hoạch DRAFT chờ Chủ duyệt, Bài viết `OWNER_REVIEW` chờ Chủ duyệt, hoặc nhiệm vụ `READY` của chính user.
+  - **Vùng 2: Bị chặn / Trễ hạn:** Lọc chính xác các bài có `blocked_reason` (Blockers) và tính hạn chót công đoạn hiện tại so với `timezone.now()` (Overdue). Bài đã xuất bản hoặc đã hủy không bao giờ bị tính trễ hạn.
+  - **Vùng 3: Tiến độ gói:** Thống kê `x/y bài đã đăng` (trong đó mẫu số y không tính các bài đã hủy theo Spec AC14), ghi chú riêng số bài hủy nếu có.
+  - **Phân quyền cách ly nghiêm ngặt:** Chủ workspace xem toàn bộ; Điều phối viên chỉ xem trong phạm vi gói được phân công; Thành viên thường chỉ xem các bài/nhiệm vụ của mình. Bộ đếm chỉ số tuyệt đối không làm rò rỉ dữ liệu ngoài quyền đọc.
+- **`get_my_tasks_for_workspace()` (`apps/workspaces/selectors.py`):**
+  - Thứ tự ưu tiên (Spec UI06): 1. Bài bị chặn (`is_blocked`) &rarr; 2. Việc trễ hạn (`is_overdue`) &rarr; 3. Đến hạn gần nhất (`due_at ASC`).
+  - Hỗ trợ lọc theo trạng thái (`READY`, `IN_PROGRESS`, `WAITING`, `DONE`, `CANCELLED`), theo vai trò (`WRITE`, `EDIT`, `PUBLISH`) và theo gói nội dung.
+- **`user_has_entity_access()` & `get_user_notifications()` (`apps/workspaces/selectors.py`):**
+  - Kiểm tra quyền thực tế tại thời điểm đọc. Nếu thành viên bị thu hồi khỏi workspace hoặc bị đổi người phụ trách bài viết, thông báo cũ tự động bị ẩn khỏi danh sách và số chưa đọc; link thông báo kiểm tra quyền tại backend và trả về 403/404 không làm rò rỉ nội dung bài.
+
+### 13.3. Giao diện & Trải nghiệm Người dùng B09
+- `templates/workspaces/workspace_detail.html`: Màn hình Dashboard (UI01) tích hợp 3 vùng, stat cards và modular partials (`dashboard_decision_region.html`, `dashboard_blocked_overdue_region.html`, `dashboard_package_progress_region.html`).
+- `templates/workspaces/my_tasks.html` & `my_tasks_card.html`: Màn hình Việc của tôi (UI06) với bộ lọc, sắp xếp ưu tiên trực quan, bảo vệ nhiệm vụ `WAITING` không có nút thao tác vượt bước, phân trang 20 dòng/trang.
+- `templates/workspaces/notifications.html`: Hộp thông báo trong ứng dụng, lọc Chưa đọc / Tất cả, đánh dấu đã đọc từng cái hoặc tất cả 1-click.
+- `templates/base.html`: Chuông thông báo 🔔 trên thanh điều hướng với badge đỏ số lượng chưa đọc thời gian thực.
+- Routes logic: `GET /workspaces/{w}/dashboard`, `GET /tasks/mine/`, `GET /notifications/`, `POST /notifications/{id}/read/`, `POST /notifications/read-all/`.
+
+
+### 13.4. Kết quả Kiểm thử Tự động B09 (19/19 tests Passed)
+File kiểm thử: `core/tests_b09_dashboard_tasks_notifications.py`
+1. `test_database_test_isolation`: Xác nhận test runner chạy trên DB test cách ly.
+2. `test_dashboard_metrics_and_regions_for_owner`: Dashboard UI01 của Chủ hiển thị đúng 3 vùng, gói DRAFT chờ duyệt, bài chờ duyệt, bài bị chặn.
+3. `test_dashboard_coordinator_scope_and_no_leak`: Điều phối viên chỉ xem gói phụ trách, không thấy gói bí mật hay bài bị chặn ngoài phạm vi.
+4. `test_dashboard_member_scope_and_no_leak`: Member chỉ thấy nhiệm vụ READY của mình, không lộ count gói khác.
+5. `test_dashboard_outsider_and_inactive_member_denied`: Outsider và Thành viên INACTIVE nhận HTTP 404 khi vào Dashboard.
+6. `test_overdue_boundary_calculations`: Tính toán trễ hạn chính xác theo trạng thái công đoạn hiện tại; bài PUBLISHED/CANCELLED không bị tính trễ hạn.
+7. `test_my_tasks_prioritization_and_filters`: Sắp xếp ưu tiên chuẩn (Blocker > Overdue > Due_at), bộ lọc trạng thái/vai trò hoạt động chính xác.
+8. `test_my_tasks_after_b08_reassignment_and_deactivation`: Sau bàn giao B08, người nhận mới thấy việc, người cũ mất quyền thao tác.
+9. `test_notification_events_generation_and_recipients`: Sinh thông báo chuẩn 5 sự kiện (duyệt kế hoạch, nộp bản nháp, yêu cầu sửa, báo chặn, gỡ chặn); không thông báo cho chính actor.
+10. `test_notification_idempotency_no_duplicate`: Gửi lặp cùng idempotency event_id không tạo thông báo trùng lặp.
+11. `test_notification_rollback_safety`: Lỗi nghiệp vụ gây rollback không để lại thông báo rác trong DB.
+12. `test_notification_read_and_permissions`: Người dùng chỉ đọc thông báo của mình (người khác nhận 404); thành viên mất quyền nhận 403 và bị ẩn thông báo.
+13. `test_empty_states_and_pagination`: Trạng thái rỗng hiển thị thông điệp thân thiện; phân trang hoạt động chuẩn xác.
+14. `test_tasks_mine_redirect`: Route `GET /tasks/mine/` điều hướng chính xác về Việc của tôi ở workspace đang kích hoạt.
+15. `test_handover_notification_on_member_deactivation`: Bàn giao việc khi thu hồi thành viên (AC11) tự động gửi thông báo bàn giao cho người thay thế.
+16. `test_owner_request_changes_notification_recipients`: Chủ yêu cầu sửa trả về WRITING gửi thông báo cho writer; trả về EDITING gửi cho editor.
+17. `test_notifications_filter_unread_and_mark_all_read`: Nút đánh dấu tất cả đã đọc và bộ lọc chưa đọc hoạt động hoàn hảo.
+18. `test_my_tasks_pagination_over_20_items`: Phân trang 20 nhiệm vụ / trang theo quy định Spec.
+19. `test_navbar_bell_unread_badge_rendering`: Navbar render chuông thông báo kèm badge đếm số lượng chưa đọc chính xác.
+
+### 13.5. Phân tách Môi trường & Tình trạng Cổng Kiểm chứng (Gates)
+| Môi trường CSDL | Cấu hình sử dụng | Kết quả kiểm thử B09 | Trạng thái cổng (Gate) |
+|---|---|---|---|
+| **SQLite (Test Runner cách ly)** | `core.test_settings` (SQLite in-memory test DB `test_suite_db.sqlite3`) | **19/19 B09 tests Passed** (Tổng suite: **180/180 tests Passed**) | **ĐẠT (VERIFIED)** — Toàn bộ Dashboard UI01, Việc của tôi UI06, hệ thống Thông báo, phân quyền ma trận đọc, chống N+1 và template rendering đạt 100%. |
+| **PostgreSQL (Môi trường máy cục bộ)** | `core.postgres_test_settings` (yêu cầu `TEST_DATABASE_URL` kết nối máy chủ PG) | *Chưa chạy do máy trạm local hiện chưa cài đặt / bật dịch vụ PostgreSQL engine cục bộ (đã xác nhận cổng 5432 đóng).* | **CHỜ KẾT NỐI (PENDING PG RUNNER)** — Đã duy trì sẵn file cấu hình cách ly `core/postgres_test_settings.py` để chạy ngay khi có database PostgreSQL. |
+
+---
 
 ## 12. Chi tiết thực hiện B08 (Đổi người phân công, Thu hồi thành viên & Ngoại lệ)
 

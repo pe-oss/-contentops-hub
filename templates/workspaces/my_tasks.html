@@ -3,62 +3,89 @@
 {% block title %}Việc của tôi — {{ workspace.name }}{% endblock %}
 
 {% block content %}
-<section class="dashboard-page" style="max-width: 900px; margin: 0 auto;">
-  <div class="dashboard-header" style="margin-bottom: 24px;">
+<section class="dashboard-page" style="max-width: 950px; margin: 0 auto;">
+  <div class="dashboard-header" style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
     <div>
       <p class="eyebrow"><a href="{% url 'workspaces:detail' workspace.id %}">← {{ workspace.name }}</a></p>
-      <h1>📋 Việc của tôi</h1>
-      <p class="muted">Danh sách các nhiệm vụ được phân công cho bạn trong workspace này.</p>
+      <h1 style="margin: 0 0 4px 0;">📋 Việc của tôi (UI06)</h1>
+      <p class="muted" style="margin: 0;">Ưu tiên: <strong>Bị chặn &gt; Trễ hạn &gt; Đến hạn gần nhất</strong>. Chỉ các nhiệm vụ được giao cho bạn.</p>
     </div>
-    <div>
-      <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn">📦 Kế hoạch &amp; Gói bài</a>
+    <div style="display: flex; gap: 8px;">
+      <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn">📦 Kế hoạch &amp; Gói</a>
+      <a href="{% url 'workspaces:workspace_notifications' workspace.id %}" class="btn">🔔 Thông báo</a>
     </div>
   </div>
 
-  <!-- Bộ lọc trạng thái -->
-  <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">
-    <a href="{% url 'workspaces:my_tasks' workspace.id %}" class="btn {% if not status_filter %}btn-primary{% endif %}">Tất cả</a>
-    <a href="{% url 'workspaces:my_tasks' workspace.id %}?status=READY" class="btn {% if status_filter == 'READY' %}btn-primary{% endif %}">Sẵn sàng (READY)</a>
-    <a href="{% url 'workspaces:my_tasks' workspace.id %}?status=IN_PROGRESS" class="btn {% if status_filter == 'IN_PROGRESS' %}btn-primary{% endif %}">Đang làm</a>
-    <a href="{% url 'workspaces:my_tasks' workspace.id %}?status=WAITING" class="btn {% if status_filter == 'WAITING' %}btn-primary{% endif %}">Chờ bước trước</a>
-    <a href="{% url 'workspaces:my_tasks' workspace.id %}?status=DONE" class="btn {% if status_filter == 'DONE' %}btn-primary{% endif %}">Hoàn thành</a>
+  <!-- Bộ lọc (Trạng thái, Gói, Vai trò) -->
+  <div class="card" style="padding: 14px; margin-bottom: 20px;">
+    <form method="get" style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin: 0;">
+      <div style="flex: 1; min-width: 140px;">
+        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Trạng thái:</label>
+        <select name="status" class="form-control" style="font-size: 13px; padding: 6px 10px;">
+          <option value="">-- Tất cả trạng thái --</option>
+          <option value="READY" {% if status_filter == 'READY' %}selected{% endif %}>Sẵn sàng (READY)</option>
+          <option value="IN_PROGRESS" {% if status_filter == 'IN_PROGRESS' %}selected{% endif %}>Đang làm (IN_PROGRESS)</option>
+          <option value="WAITING" {% if status_filter == 'WAITING' %}selected{% endif %}>Chờ bước trước (WAITING)</option>
+          <option value="DONE" {% if status_filter == 'DONE' %}selected{% endif %}>Hoàn thành (DONE)</option>
+          <option value="CANCELLED" {% if status_filter == 'CANCELLED' %}selected{% endif %}>Đã hủy (CANCELLED)</option>
+        </select>
+      </div>
+
+      <div style="flex: 1; min-width: 140px;">
+        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Vai trò:</label>
+        <select name="role" class="form-control" style="font-size: 13px; padding: 6px 10px;">
+          <option value="">-- Tất cả vai trò --</option>
+          <option value="WRITE" {% if role_filter == 'WRITE' %}selected{% endif %}>Viết bài (WRITE)</option>
+          <option value="EDIT" {% if role_filter == 'EDIT' %}selected{% endif %}>Biên tập (EDIT)</option>
+          <option value="PUBLISH" {% if role_filter == 'PUBLISH' %}selected{% endif %}>Xuất bản (PUBLISH)</option>
+        </select>
+      </div>
+
+      {% if user_packages %}
+      <div style="flex: 1; min-width: 160px;">
+        <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">Gói nội dung:</label>
+        <select name="package" class="form-control" style="font-size: 13px; padding: 6px 10px;">
+          <option value="">-- Tất cả các gói --</option>
+          {% for pkg in user_packages %}
+            <option value="{{ pkg.id }}" {% if package_filter == pkg.id|stringformat:"s" %}selected{% endif %}>{{ pkg.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div>
+        <button type="submit" class="btn btn-primary" style="font-size: 13px; padding: 7px 14px;">Lọc</button>
+        <a href="{% url 'workspaces:my_tasks' workspace.id %}" class="btn" style="font-size: 13px; padding: 7px 10px;">Đặt lại</a>
+      </div>
+    </form>
   </div>
 
+  <!-- Danh sách công việc -->
   {% if tasks %}
     <div style="display: flex; flex-direction: column; gap: 12px;">
       {% for t in tasks %}
-        <div class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; {% if t.status == 'READY' %}border-left: 4px solid var(--primary);{% endif %}">
-          <div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-              <span class="badge" style="font-size: 11px;">{{ t.get_role_display }}</span>
-              <span class="badge" style="font-size: 11px; background: {% if t.status == 'READY' %}#3b82f6; color: white;{% elif t.status == 'DONE' %}#10b981; color: white;{% else %}#f1f5f9; color: #475569;{% endif %}">
-                {{ t.get_status_display }}
-              </span>
-              {% if t.item.is_blocked %}
-                <span class="badge" style="background: #ef4444; color: white; font-size: 11px;">⚠️ Bị chặn</span>
-              {% endif %}
-            </div>
-            <h3 style="margin: 0 0 4px 0; font-size: 16px;">
-              <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" style="text-decoration: none; color: inherit;">
-                {{ t.item.title }}
-              </a>
-            </h3>
-            <p class="muted" style="margin: 0; font-size: 13px;">
-              Gói: <strong>{{ t.item.package.name }}</strong> &bull;
-              Hạn: <strong>{{ t.due_at|date:"H:i d/m/Y" }}</strong>
-            </p>
-          </div>
-          <div>
-            <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="btn btn-primary" style="font-size: 13px;">
-              Mở tác vụ →
-            </a>
-          </div>
-        </div>
+        {% include "workspaces/my_tasks_card.html" %}
       {% endfor %}
     </div>
+
+    <!-- Phân trang (Spec UI01, UI06) -->
+    {% if page_obj.has_other_pages %}
+      <div style="display: flex; justify-content: center; gap: 8px; margin-top: 24px; align-items: center;">
+        {% if page_obj.has_previous %}
+          <a href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}{% if package_filter %}&package={{ package_filter }}{% endif %}" class="btn" style="font-size: 13px;">← Trang trước</a>
+        {% endif %}
+
+        <span style="font-size: 13px; color: var(--muted);">Trang {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} (Tổng: {{ page_obj.paginator.count }})</span>
+
+        {% if page_obj.has_next %}
+          <a href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}{% if package_filter %}&package={{ package_filter }}{% endif %}" class="btn" style="font-size: 13px;">Trang sau →</a>
+        {% endif %}
+      </div>
+    {% endif %}
+
   {% else %}
-    <div class="card" style="text-align: center; padding: 40px 20px;">
-      <p class="muted" style="margin-bottom: 12px;">Bạn không có nhiệm vụ nào trong danh mục này.</p>
+    <div class="card" style="text-align: center; padding: 48px 20px;">
+      <p class="muted" style="margin-bottom: 12px; font-size: 15px;">Bạn không có nhiệm vụ nào phù hợp với bộ lọc hiện tại.</p>
       <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn">Xem danh sách Gói nội dung</a>
     </div>
   {% endif %}

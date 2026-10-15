@@ -194,3 +194,14 @@ class AssignmentHistoryAdmin(admin.ModelAdmin):
     search_fields = ("item__title", "package__name", "previous_assignee__user__username", "new_assignee__user__username", "reason")
     readonly_fields = ("id", "workspace", "package", "item", "task", "role", "previous_assignee", "new_assignee", "reassigned_by", "reason", "idempotency_key", "created_at")
 
+
+from .models import Notification
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ("recipient", "event_type", "title", "workspace", "read_at", "created_at")
+    list_filter = ("event_type", "created_at", "read_at")
+    search_fields = ("recipient__username", "recipient__email", "title", "message", "event_id")
+    readonly_fields = ("id", "workspace", "recipient", "event_id", "event_type", "entity_type", "entity_id", "title", "message", "target_url", "read_at", "created_at")
+
