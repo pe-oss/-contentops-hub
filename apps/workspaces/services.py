@@ -4,10 +4,11 @@ from typing import Any
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 
 from .models import (
-    AccessRole, BrandProfile, ContentApproval, ContentItem, ContentItemState, ContentPublication, ContentVersion,
-    ContentApproval, EmploymentType, Membership, MembershipStatus, Package, PackageStatus,
+    AccessRole, AssignmentHistory, AssignmentRole, BrandProfile, ContentApproval, ContentItem, ContentItemState, ContentPublication, ContentVersion,
+    EmploymentType, Membership, MembershipStatus, Package, PackageStatus,
     PlanApproval, ReviewDecision, Task, TaskExecutionMode, TaskRole, TaskStatus,
     Workspace, validate_timezone,
 )
@@ -521,16 +522,82 @@ def update_member_settings(
     return membership
 
 
+def _reassign_member_responsibilities(
+    *,
+    user: Any,
+    workspace: Workspace,
+    target_membership: Membership,
+    locked_replacement: Membership,
+    open_tasks: list[Task],
+    assigned_items: list[ContentItem],
+    coord_packages: list[Package],
+    reason: str,
+) -> None:
+    """Bàn giao toàn bộ trách nhiệm mở sang người thay thế và ghi audit (Spec AC11)."""
+    clean_reason = (reason or "").strip() or f"Bàn giao trách nhiệm do thu hồi thành viên {target_membership.user.username} (Spec AC11)"
+
+    for t in open_tasks:
+        t.assignee_membership = locked_replacement
+        t.save(update_fields=["assignee_membership", "updated_at"])
+
+    for it in assigned_items:
+        changed_fields = []
+        for role, field_name in [
+            (AssignmentRole.WRITE, "writer_membership"),
+            (AssignmentRole.EDIT, "editor_membership"),
+            (AssignmentRole.PUBLISH, "publisher_membership"),
+        ]:
+            if getattr(it, f"{field_name}_id") == target_membership.id:
+                setattr(it, field_name, locked_replacement)
+                changed_fields.append(field_name)
+                task_role = TaskRole.WRITE if role == AssignmentRole.WRITE else (TaskRole.EDIT if role == AssignmentRole.EDIT else TaskRole.PUBLISH)
+                AssignmentHistory.objects.create(
+                    workspace=workspace,
+                    package=it.package,
+                    item=it,
+                    task=Task.objects.filter(item=it, role=task_role).first(),
+                    role=role,
+                    previous_assignee=target_membership,
+                    new_assignee=locked_replacement,
+                    reassigned_by=user,
+                    reason=clean_reason,
+                )
+        if changed_fields:
+            it.row_version += 1
+            it.save(update_fields=changed_fields + ["row_version", "updated_at"])
+
+    for pkg in coord_packages:
+        pkg.coordinator_membership = locked_replacement
+        pkg.row_version += 1
+        pkg.save(update_fields=["coordinator_membership", "row_version", "updated_at"])
+        AssignmentHistory.objects.create(
+            workspace=workspace,
+            package=pkg,
+            item=None,
+            task=None,
+            role=AssignmentRole.COORDINATOR,
+            previous_assignee=target_membership,
+            new_assignee=locked_replacement,
+            reassigned_by=user,
+            reason=clean_reason,
+        )
+
+
+
 @transaction.atomic
 def deactivate_membership(
     *,
     user: Any,
     workspace: Workspace,
     membership: Membership,
+    replacement_membership: Membership | None = None,
+    reason: str = "",
 ) -> Membership:
     """
-    Vô hiệu hóa thành viên (status = INACTIVE). Chỉ Chủ.
-    Bảo vệ Chủ: Tuyệt đối không cho phép vô hiệu hóa Chủ workspace.
+    Vô hiệu hóa thành viên (status = INACTIVE). Chỉ Chủ workspace (Spec mục 3.1, 3.2, AC11, B08).
+    - Bảo vệ Chủ: Tuyệt đối không cho phép vô hiệu hóa Chủ workspace (Single Owner guard).
+    - Bàn giao trách nhiệm nguyên tử (AC11):
+      Nếu thành viên có trách nhiệm mở, bắt buộc phải có phương án bàn giao hợp lệ.
     """
     if not user or not user.is_authenticated:
         raise PermissionDenied("Yêu cầu đăng nhập.")
@@ -544,9 +611,74 @@ def deactivate_membership(
     if membership.user_id == workspace.owner_user_id or membership.access_role == AccessRole.OWNER:
         raise ValidationError("Không thể vô hiệu hóa Chủ workspace.")
 
-    membership.status = MembershipStatus.INACTIVE
-    membership.save(update_fields=["status", "updated_at"])
-    return membership
+    target_membership = Membership.objects.select_for_update().filter(id=membership.id).first()
+    if not target_membership:
+        raise ValidationError("Thành viên không tồn tại.")
+
+    if target_membership.status == MembershipStatus.INACTIVE:
+        return target_membership
+
+    open_tasks = list(
+        Task.objects.select_for_update()
+        .filter(
+            assignee_membership=target_membership,
+            workspace=workspace,
+            status__in=[TaskStatus.WAITING, TaskStatus.READY, TaskStatus.IN_PROGRESS],
+        )
+        .select_related("item", "item__package")
+    )
+    assigned_items = list(
+        ContentItem.objects.select_for_update()
+        .filter(
+            Q(writer_membership=target_membership)
+            | Q(editor_membership=target_membership)
+            | Q(publisher_membership=target_membership),
+            workspace=workspace,
+        )
+        .exclude(state__in=[ContentItemState.CANCELLED, ContentItemState.PUBLISHED])
+        .select_related("package")
+    )
+    coord_packages = list(
+        Package.objects.select_for_update()
+        .filter(
+            coordinator_membership=target_membership,
+            workspace=workspace,
+            status__in=[PackageStatus.DRAFT, PackageStatus.ACTIVE],
+        )
+    )
+
+    if bool(open_tasks or assigned_items or coord_packages):
+        if not replacement_membership:
+            raise ValidationError(
+                f"Thành viên đang có trách nhiệm mở ({len(open_tasks)} nhiệm vụ, {len(assigned_items)} bài viết, {len(coord_packages)} gói). "
+                "Bắt buộc phải chỉ định người thay thế hoặc Chủ workspace trước khi thu hồi (Spec AC11)."
+            )
+
+        locked_replacement = (
+            Membership.objects.select_for_update()
+            .filter(id=replacement_membership.id, workspace=workspace)
+            .first()
+        )
+        if not locked_replacement or locked_replacement.status != MembershipStatus.ACTIVE:
+            raise ValidationError("Người nhận thay thế phải đang hoạt động (ACTIVE) và thuộc cùng workspace.")
+
+        if locked_replacement.id == target_membership.id:
+            raise ValidationError("Người nhận thay thế không được là chính thành viên đang bị thu hồi.")
+
+        _reassign_member_responsibilities(
+            user=user,
+            workspace=workspace,
+            target_membership=target_membership,
+            locked_replacement=locked_replacement,
+            open_tasks=open_tasks,
+            assigned_items=assigned_items,
+            coord_packages=coord_packages,
+            reason=reason,
+        )
+
+    target_membership.status = MembershipStatus.INACTIVE
+    target_membership.save(update_fields=["status", "updated_at"])
+    return target_membership
 
 
 @transaction.atomic
@@ -2177,4 +2309,128 @@ def submit_for_owner_review(
         edit_task.save(update_fields=["status", "updated_at"])
 
     return decision, locked_item
+
+
+
+@transaction.atomic
+def reassign_item_assignment(
+    *,
+    user: Any,
+    item: ContentItem,
+    role: str,
+    new_assignee_membership: Membership,
+    reason: str,
+    expected_row_version: int | None = None,
+    idempotency_key: str | None = None,
+) -> tuple[AssignmentHistory, ContentItem]:
+    """
+    Đổi người phân công cho bài viết (Spec F07, 6.1, 6.3, 7 UI05, 9, 10, 13 B08, AC10, AC12):
+    - Quyền: Chủ workspace (toàn workspace) hoặc Điều phối viên được gán cho gói (trong gói phụ trách).
+    - Thành viên thường (kể cả người viết/biên tập/xuất bản) không có quyền đổi người.
+    - Người nhận mới phải ACTIVE và thuộc cùng workspace.
+    - Không thể đổi sang chính người đang chịu trách nhiệm hiện tại.
+    - Bắt buộc có lý do và expected_row_version (OCC).
+    - Kiểm tra quyền, trạng thái và OCC trong cùng transaction. Lệch version trả ConcurrencyConflictError (HTTP 409).
+    - Idempotency key: Nếu gửi lại request với cùng key, trả về bản ghi cũ, không tạo trùng.
+    - Đồng bộ người phân công trên ContentItem và Task liên quan.
+    - Tuân thủ trạng thái Task: Task WAITING, READY, IN_PROGRESS, DONE, CANCELLED giữ nguyên status, không reset tiến độ.
+    - Blocker: Bài BLOCKED vẫn cho phép đổi người, cờ blocked_reason/blocked_by/blocked_at được giữ nguyên.
+    - Không sửa đổi tác giả của ContentVersion, ReviewDecision, ContentApproval, ContentPublication.
+    - Ghi nhận AssignmentHistory append-only bất biến.
+    """
+    if not user or not user.is_authenticated:
+        raise PermissionDenied("Yêu cầu đăng nhập.")
+
+    user_membership = get_active_membership(user, item.workspace)
+    if not user_membership or not user_membership.is_active:
+        raise PermissionDenied("Bạn không có quyền trong workspace này.")
+
+    package = item.package
+    is_owner = (user_membership.access_role == AccessRole.OWNER) or (item.workspace.owner_user_id == user.id)
+    is_coordinator = (package.coordinator_membership_id == user_membership.id)
+
+    if not is_owner and not is_coordinator:
+        raise PermissionDenied("Chỉ Chủ workspace hoặc Người điều phối gói mới có quyền đổi người phân công.")
+
+    valid_roles = [TaskRole.WRITE, TaskRole.EDIT, TaskRole.PUBLISH]
+    if role not in valid_roles:
+        raise ValidationError({"role": f"Vai trò không hợp lệ: '{role}'. Phải là WRITE, EDIT hoặc PUBLISH."})
+
+    clean_reason = (reason or "").strip()
+    if not clean_reason:
+        raise ValidationError({"reason": "Lý do bàn giao bắt buộc phải được cung cấp."})
+
+    if item.state == ContentItemState.CANCELLED:
+        raise ValidationError("Không thể đổi người phân công cho bài viết đã bị hủy.")
+
+    if not new_assignee_membership:
+        raise ValidationError({"new_assignee": "Vui lòng chọn người nhận phân công mới."})
+
+    if new_assignee_membership.workspace_id != item.workspace_id:
+        raise ValidationError({"new_assignee": "Người nhận mới phải thuộc cùng workspace."})
+
+    clean_idemp = (idempotency_key or "").strip()
+
+    locked_item = ContentItem.objects.select_for_update().get(id=item.id)
+
+    # Chống nhấp đôi qua idempotency_key
+    if clean_idemp:
+        existing = (
+            AssignmentHistory.objects.filter(item=locked_item, idempotency_key=clean_idemp)
+            .select_related("previous_assignee__user", "new_assignee__user", "reassigned_by")
+            .first()
+        )
+        if existing:
+            return existing, locked_item
+
+    # Khóa người nhận mới và kiểm tra trạng thái
+    locked_new_assignee = (
+        Membership.objects.select_for_update()
+        .filter(id=new_assignee_membership.id, workspace=item.workspace)
+        .first()
+    )
+    if not locked_new_assignee or locked_new_assignee.status != MembershipStatus.ACTIVE:
+        raise ValidationError({"new_assignee": "Người nhận mới phải đang hoạt động (ACTIVE)."})
+
+    # Kiểm tra OCC
+    _verify_row_version(locked_item.row_version, expected_row_version)
+
+    # Xác định người phụ trách hiện tại
+    role_to_field = {
+        TaskRole.WRITE: "writer_membership",
+        TaskRole.EDIT: "editor_membership",
+        TaskRole.PUBLISH: "publisher_membership",
+    }
+    field_name = role_to_field[role]
+    prev_assignee = getattr(locked_item, field_name)
+
+    if prev_assignee.id == locked_new_assignee.id:
+        raise ValidationError({"new_assignee": "Người nhận mới phải khác người đang chịu trách nhiệm hiện tại."})
+
+    # Đồng bộ ContentItem
+    setattr(locked_item, field_name, locked_new_assignee)
+    locked_item.row_version += 1
+    locked_item.save(update_fields=[field_name, "row_version", "updated_at"])
+
+    # Đồng bộ Task (nếu đã sinh) — giữ nguyên trạng thái công việc
+    related_task = Task.objects.select_for_update().filter(item=locked_item, role=role).first()
+    if related_task:
+        related_task.assignee_membership = locked_new_assignee
+        related_task.save(update_fields=["assignee_membership", "updated_at"])
+
+    # Ghi nhận AssignmentHistory
+    assignment = AssignmentHistory.objects.create(
+        workspace=locked_item.workspace,
+        package=locked_item.package,
+        item=locked_item,
+        task=related_task,
+        role=role,
+        previous_assignee=prev_assignee,
+        new_assignee=locked_new_assignee,
+        reassigned_by=user,
+        reason=clean_reason,
+        idempotency_key=clean_idemp,
+    )
+
+    return assignment, locked_item
 

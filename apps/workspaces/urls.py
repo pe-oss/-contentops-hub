@@ -13,6 +13,7 @@ from .views import (
     ContentItemUnblockView,
     ContentItemRecordPublicationView,
     ContentPublicationEditView,
+    ContentItemReassignView,
     ContentItemEditorVersionView,
     ContentItemRequestChangesView,
     ContentItemSaveDraftView,
@@ -107,6 +108,17 @@ urlpatterns = [
         name="item_unblock",
     ),
     path(
+        "<uuid:workspace_id>/packages/<uuid:package_id>/items/<uuid:item_id>/assignments/",
+        ContentItemReassignView.as_view(),
+        name="item_assignments",
+    ),
+    path(
+        "<uuid:workspace_id>/items/<uuid:item_id>/assignments/",
+        ContentItemReassignView.as_view(),
+        name="item_assignments_direct",
+    ),
+
+    path(
         "<uuid:workspace_id>/packages/<uuid:package_id>/items/new/",
         ContentItemCreateView.as_view(),
         name="item_create",
@@ -165,6 +177,12 @@ urlpatterns = [
         MemberDeactivateView.as_view(),
         name="member_deactivate",
     ),
+    path(
+        "<uuid:workspace_id>/members/<uuid:membership_id>/revoke/",
+        MemberDeactivateView.as_view(),
+        name="member_revoke",
+    ),
+
     path(
         "<uuid:workspace_id>/members/<uuid:membership_id>/reactivate/",
         MemberReactivateView.as_view(),

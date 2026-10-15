@@ -6,7 +6,7 @@
 
 - **Spec cơ sở:** `docs/Spec-Ban-Content-Marketing-v1.0.md` (Phiên bản v1.0).
 - **Mốc xuất phát:** Nhánh `chore/boilerplate-baseline` (commit `4fd4046`).
-- **Nhánh hiện tại:** `feat/b06` (tiếp nối nhánh `feat/b05`, commit `595ffc4`).
+- **Nhánh hiện tại:** `feat/b08` (tiếp nối nhánh `feat/b07`, commit `38373f1`).
 
 | Giai đoạn / Nhiệm vụ | Trạng thái | Ghi chú |
 |---|---|---|
@@ -19,9 +19,92 @@
 | **B05 — Phiên bản và luồng viết/biên tập (Writing/Editing)** | **HOÀN TẤT** | Spec mục 5 F03-F04, 6, 9, 13 B05, 14 AC06/AC08/AC10/AC12 (ContentVersion bất biến, ReviewDecision append-only, Brief copy AI 1-click, Checklist 4 mục, OCC 409, phân quyền, Việc của tôi) |
 | **B06 — Chủ duyệt, mở lại, trạng thái (Approval & Lifecycle)** | **HOÀN TẤT** | Spec mục 5 F05, 6, 9, 13 B06, 14 AC07/AC08/AC09/AC10/AC12 (Chủ duyệt version chốt, ContentApproval append-only & invalidation khi mở lại, stale version 409, phân quyền Chủ, nút rút duyệt, cờ chặn/gỡ chặn blocker, UI05 tác nghiệp hoàn chỉnh) |
 | **B07 — Xuất bản và hoàn thành gói (Publishing)** | **HOÀN TẤT** | Spec mục 5 F06, 6.1, 6.2, 7 UI04, 9, 10, 13 B07, 14 AC12/AC13/AC14 (ContentPublication lưu lịch sử xuất bản có URL, thời điểm, approval/version chốt; Task PUBLISH -> DONE; tự động hoàn thành gói COMPLETED; giữ lịch sử khi mở lại; sửa metadata audit trail; OCC 409 & Idempotency) |
-| **B08 — Blocker, đổi người, thu hồi (Task Reassignment)** | CHƯA LÀM | Spec mục 6, 9, 13 B08 |
+| **B08 — Blocker, đổi người, thu hồi (Task Reassignment)** | **HOÀN TẤT** | Spec mục 3.1, 3.2, 5 F07, 6.1, 6.2, 6.3, 7 UI03/UI05, 9, 10, 13 B08, 14 AC10, AC11, AC12 (AssignmentHistory append-only audit trail; đồng bộ ContentItem & Task nguyên tử; phân quyền Chủ workspace & Điều phối viên gói; OCC 409 & Idempotency; thu hồi thành viên bắt buộc bàn giao việc mở AC11; bảo vệ Single Owner; bảo toàn blocker AC12) |
 | **B09 — Tổng quan, Việc của tôi, thông báo (Dashboard & Tasks)** | CHƯA LÀM | Spec mục 7 UI01/UI06, 8, 9, 13 B09 |
 | **B10 — Responsive, lỗi, backup, QA lõi (Core QA)** | CHƯA LÀM | Spec mục 13 B10, 14 AC01-AC18 |
+
+## 12. Chi tiết thực hiện B08 (Đổi người phân công, Thu hồi thành viên & Ngoại lệ)
+
+### 12.1. Mô hình Dữ liệu B08 (`apps/workspaces/models.py`)
+- **`AssignmentRole` (Enum vai trò phân công):** `WRITE` ("Viết bài"), `EDIT` ("Biên tập"), `PUBLISH` ("Xuất bản"), `COORDINATOR` ("Điều phối gói").
+- **`AssignmentHistory` (Bản ghi lịch sử bàn giao phân công - Spec mục 3.1, 3.2, 5 F07, 6.3, 7 UI05, 9, 10, 13 B08, AC11):**
+  - Lưu trữ: `id` (UUID), `workspace`, `package`, `item` (nullable với gói), `task` (nullable nếu gói chưa duyệt), `role`, `previous_assignee`, `new_assignee`, `reassigned_by`, `reason` (bắt buộc, max 2.000 ký tự), `idempotency_key`, `created_at`.
+  - Tính chất append-only bất biến: Override `save()` chặn sửa hoặc cập nhật bản ghi đã tồn tại.
+  - Chỉ mục tìm kiếm: `idx_assign_ws_created`, `idx_assign_item_created`, `idx_assign_pkg_created`.
+  - Migration: `apps/workspaces/migrations/0010_assignmenthistory.py`.
+  - Quản trị: `apps/workspaces/admin.py` (`AssignmentHistoryAdmin`).
+
+### 12.2. Domain Services B08 (`apps/workspaces/services.py`)
+- **`reassign_item_assignment()` (Đổi người phân công bài viết):**
+  - **Phân quyền chặt chẽ:** Chỉ Chủ workspace (`AccessRole.OWNER` toàn workspace) hoặc Điều phối viên được gán cho gói (`package.coordinator_membership` trong gói phụ trách). Thành viên thường (`MEMBER`), outsider hoặc tài khoản `INACTIVE` bị từ chối `PermissionDenied`.
+  - **Ràng buộc đối tượng:** Người nhận mới phải thuộc cùng workspace, đang `ACTIVE`, và phải khác người đang chịu trách nhiệm hiện tại.
+  - **Bảo vệ OCC 409 (AC10):** Xác thực `expected_row_version` với `locked_item.row_version` qua `select_for_update()`. Lệch trả `ConcurrencyConflictError` (HTTP 409).
+  - **Chống trùng lặp (Idempotency):** Sử dụng `idempotency_key` để nhấp đôi không tạo bản ghi bàn giao trùng hay tăng row_version thừa.
+  - **Đồng bộ nguyên tử ContentItem & Task (Spec 6.2):**
+    - Cập nhật trường phân công trên `ContentItem` (`writer_membership` / `editor_membership` / `publisher_membership`).
+    - Cập nhật `Task.assignee_membership` tương ứng.
+    - **Bảo toàn tiến độ công việc:** Trạng thái Task (`WAITING`, `READY`, `IN_PROGRESS`, `DONE`, `CANCELLED`) được giữ nguyên, tuyệt đối không tự ý reset tiến độ.
+  - **Bảo toàn tính bất biến & Blocker (Spec F07, AC12):**
+    - Không làm thay đổi tác giả của `ContentVersion`, người quyết định `ReviewDecision`, người duyệt `ContentApproval`, hoặc người xuất bản `ContentPublication`.
+    - Không tự tạo phiên bản, tự duyệt hoặc tự đăng bài.
+    - Bài `BLOCKED` vẫn cho phép đổi người; cờ chặn (`blocked_reason`, `blocked_by`, `blocked_at`) được giữ nguyên 100%.
+- **`deactivate_membership()` (Thu hồi thành viên có trách nhiệm mở — AC11):**
+  - **Chỉ Chủ workspace có quyền thu hồi.**
+  - **Bảo vệ Chủ (Single Owner guard):** Tuyệt đối không cho phép vô hiệu hóa Chủ workspace.
+  - **Rà soát trách nhiệm mở:** Quét toàn bộ Task `WAITING`, `READY`, `IN_PROGRESS` của thành viên, các bài viết chưa kết thúc (không CANCELLED/PUBLISHED) được phân công, và các gói đang điều phối (`DRAFT`/`ACTIVE`).
+  - **Bắt buộc phương án bàn giao hợp lệ (AC11):**
+    - Nếu còn trách nhiệm mở mà không có `replacement_membership`, từ chối `ValidationError`, rollback toàn bộ, không vô hiệu hóa, không bàn giao một phần.
+    - `replacement_membership` phải là thành viên `ACTIVE` cùng workspace hoặc chính Chủ workspace.
+  - **Bàn giao nguyên tử trong một transaction (`@transaction.atomic`):**
+    - Chuyển giao toàn bộ Task mở, ContentItem, Package sang người thay thế.
+    - Ghi nhận `AssignmentHistory` cho từng trách nhiệm được bàn giao.
+    - Chuyển thành viên sang `status = INACTIVE`.
+  - **Hiệu lực tức thì:** Thành viên bị vô hiệu hóa lập tức bị từ chối truy cập workspace (404 Not Found) theo quy tắc tenant isolation.
+
+### 12.3. Giao diện & Tương tác Người dùng (`views.py` & `templates/`)
+- `ContentItemReassignView`: Xử lý POST đổi người phân công (`/assignments/`), trả 302 khi thành công, 400 khi lỗi dữ liệu, 409 khi xung đột OCC; giữ nguyên dữ liệu nhập trên form.
+- `MemberDeactivateView`:
+  - `GET`: Hiển thị tóm tắt danh sách nhiệm vụ mở, bài viết được phân công, gói điều phối, form chọn người thay thế và lý do (`member_deactivate.html`).
+  - `POST`: Thực hiện bàn giao nguyên tử và vô hiệu hóa thành viên.
+- `templates/workspaces/item_detail.html`:
+  - Bổ sung form bàn giao phân công gọn gàng trong thẻ nhiệm vụ (chỉ hiển thị với Chủ / Điều phối).
+  - Vẫn cho phép thao tác bàn giao khi bài viết đang bị `BLOCKED`.
+  - Hiển thị danh sách lịch sử bàn giao phân công (`AssignmentHistory`) minh bạch theo quyền đọc.
+- `templates/workspaces/workspace_members.html`: Nút "Vô hiệu" liên kết trực tiếp tới màn hình kiểm tra trách nhiệm và chọn người thay thế.
+### 12.4. Kết quả Kiểm thử Tự động B08 (22/22 tests Passed)
+- Bộ kiểm thử: `core/tests_b08_reassignment_deactivation.py`.
+- Bao phủ 22 ca kiểm thử toàn diện:
+  1. `test_reassign_write_role_synchronizes_content_item_and_task`: Bàn giao vai trò WRITE, đồng bộ Task và ContentItem, không reset status Task.
+  2. `test_reassign_edit_and_publish_roles`: Bàn giao vai trò EDIT và PUBLISH, đồng bộ Task tương ứng.
+  3. `test_reassign_by_package_coordinator_allowed_in_own_package`: Điều phối viên có quyền đổi người trong gói phụ trách (Spec 3.1).
+  4. `test_reassign_coordinator_denied_in_other_package`: Điều phối viên bị từ chối 403 khi thao tác gói khác.
+  5. `test_reassign_by_regular_member_denied`: Thành viên thường (writer/editor) bị từ chối 403.
+  6. `test_reassign_outsider_and_inactive_actor_denied`: Outsider và Inactive actor bị từ chối theo Spec.
+  7. `test_reassign_new_assignee_invalid_workspace_or_inactive_or_same_rejected`: Từ chối người nhận khác workspace, INACTIVE, hoặc trùng người hiện tại.
+  8. `test_reassign_missing_reason_and_cancelled_item_rejected`: Từ chối khi thiếu lý do hoặc bài đã CANCELLED.
+  9. `test_reassign_occ_conflict_409_ac10`: Lệch expected_row_version nhận HTTP 409 OCC, không ghi đè dữ liệu (AC10).
+  10. `test_reassign_idempotency_ac10`: Nhấp đôi cùng idempotency_key trả về bản ghi cũ, không nhân bản (AC10).
+  11. `test_reassign_preserves_historical_authors_versions_and_decisions`: Không sửa lịch sử tác giả phiên bản, review decision, approval hay publication.
+  12. `test_reassign_preserves_blocker_state_ac12`: Bài BLOCKED vẫn đổi được người; cờ blocker giữ nguyên 100% (AC12).
+  13. `test_deactivate_member_with_no_open_tasks_success`: Thành viên không có việc mở được vô hiệu hóa trực tiếp.
+  14. `test_deactivate_member_with_open_tasks_without_replacement_rejected_ac11`: Thành viên có việc mở nhưng thiếu phương án bàn giao bị từ chối, không thu hồi một phần (AC11).
+  15. `test_deactivate_member_with_open_tasks_reassigns_atomically_ac11`: Bàn giao nguyên tử toàn bộ việc mở và vô hiệu hóa thành viên (AC11).
+  16. `test_deactivate_member_reassigns_to_owner`: Chủ workspace có thể tự tiếp quản trách nhiệm mở (Spec 3.2).
+  17. `test_deactivate_member_reassigns_unstarted_draft_items_and_package_coord`: Bàn giao bài viết ở gói DRAFT và quyền điều phối gói (AC11).
+  18. `test_deactivate_member_invalid_replacement_rejected`: Người thay thế INACTIVE, khác workspace, hoặc chính người bị thu hồi bị từ chối.
+  19. `test_deactivate_owner_strictly_prevented`: Bảo vệ Single Owner, không cho phép vô hiệu hóa Chủ.
+  20. `test_deactivated_member_loses_workspace_access_immediately`: Thành viên bị thu hồi lập tức bị từ chối truy cập (404 Not Found).
+  21. `test_view_reassign_post_success_and_validations`: Kiểm thử View HTTP POST ContentItemReassignView (302, 400, 409).
+  22. `test_view_member_deactivate_get_and_post`: Kiểm thử View HTTP MemberDeactivateView GET hiển thị việc mở & POST vô hiệu hóa.
+
+### 12.5. Phân tách Môi trường & Tình trạng Cổng Kiểm chứng (Gates)
+| Môi trường CSDL | Cấu hình sử dụng | Kết quả kiểm thử B08 | Trạng thái cổng (Gate) |
+|---|---|---|---|
+| **SQLite (Test Runner cách ly)** | `core.test_settings` (SQLite in-memory test DB `test_suite_db.sqlite3`) | **22/22 B08 tests Passed** (Tổng suite: **161/161 tests Passed**) | **ĐẠT (VERIFIED)** — Logic nghiệp vụ, phân quyền, validation, OCC, atomicity, idempotency và template rendering hoạt động chính xác 100%. |
+| **PostgreSQL (Môi trường máy cục bộ)** | `core.postgres_test_settings` (yêu cầu `TEST_DATABASE_URL` kết nối máy chủ PG) | *Chưa chạy do máy trạm local hiện chưa cài đặt / bật dịch vụ PostgreSQL engine cục bộ (đã xác nhận cổng 5432 đóng).* | **CHỜ KẾT NỐI (PENDING PG RUNNER)** — Đã chuẩn bị sẵn file cấu hình cách ly `core/postgres_test_settings.py` để chạy ngay khi có database PostgreSQL. |
+
+
+
 
 ## 11. Chi tiết thực hiện B07 (Ghi nhận xuất bản & Hoàn thành gói)
 

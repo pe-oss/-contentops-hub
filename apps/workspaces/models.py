@@ -1249,3 +1249,118 @@ class Task(models.Model):
 
 
 
+class AssignmentRole(models.TextChoices):
+    WRITE = "WRITE", "Viết bài"
+    EDIT = "EDIT", "Biên tập"
+    PUBLISH = "PUBLISH", "Xuất bản"
+    COORDINATOR = "COORDINATOR", "Điều phối gói"
+
+
+class AssignmentHistory(models.Model):
+    """
+    Lịch sử bàn giao / đổi người phân công (Spec mục 3.1, 3.2, 5 F07, 6.3, 7 UI05, 9, 10, 13 B08, AC11):
+    - Ghi nhận: bài viết (item), gói (package), nhiệm vụ (task nếu có), vai trò (role).
+    - Người chịu trách nhiệm cũ (previous_assignee), người mới (new_assignee), người thực hiện (reassigned_by).
+    - Lý do bàn giao bắt buộc (reason).
+    - Khóa chống trùng lặp (idempotency_key).
+    - Bản ghi append-only, bất biến.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name="Mã định danh (UUID)",
+    )
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="assignment_histories",
+        verbose_name="Workspace",
+    )
+    package = models.ForeignKey(
+        Package,
+        on_delete=models.CASCADE,
+        related_name="assignment_histories",
+        verbose_name="Gói nội dung",
+    )
+    item = models.ForeignKey(
+        ContentItem,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="assignment_histories",
+        verbose_name="Bài viết",
+    )
+    task = models.ForeignKey(
+        Task,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reassignments",
+        verbose_name="Nhiệm vụ",
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=AssignmentRole.choices,
+        verbose_name="Vai trò phân công",
+    )
+    previous_assignee = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="previous_assignments",
+        verbose_name="Người chịu trách nhiệm cũ",
+    )
+    new_assignee = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        related_name="new_assignments",
+        verbose_name="Người chịu trách nhiệm mới",
+    )
+    reassigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="performed_reassignments",
+        verbose_name="Người thực hiện bàn giao",
+    )
+    reason = models.TextField(
+        max_length=2000,
+        verbose_name="Lý do bàn giao",
+    )
+    idempotency_key = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        verbose_name="Khóa Idempotency",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="Thời điểm bàn giao",
+    )
+
+    class Meta:
+        verbose_name = "Lịch sử bàn giao phân công"
+        verbose_name_plural = "Lịch sử bàn giao phân công"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "created_at"], name="idx_assign_ws_created"),
+            models.Index(fields=["item", "created_at"], name="idx_assign_item_created"),
+            models.Index(fields=["package", "created_at"], name="idx_assign_pkg_created"),
+        ]
+
+    def __str__(self) -> str:
+        target = self.item.title if self.item else self.package.name
+        return f"[{self.get_role_display()}] {target}: {self.previous_assignee.user.username} -> {self.new_assignee.user.username}"
+
+    def clean(self) -> None:
+        super().clean()
+        if not (self.reason or "").strip():
+            raise ValidationError({"reason": "Lý do bàn giao bắt buộc phải được cung cấp."})
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding and AssignmentHistory.objects.filter(pk=self.pk).exists():
+            raise ValidationError("AssignmentHistory là bản ghi audit append-only và không thể chỉnh sửa.")
+        super().save(*args, **kwargs)
+
+
+

@@ -782,3 +782,96 @@ class ContentItemForm(forms.Form):
         return cleaned_data
 
 
+from .models import TaskRole
+
+
+class ReassignAssignmentForm(forms.Form):
+    """Form đổi người phân công bài viết (Spec F07, 7 UI05, 10, 13 B08)."""
+
+    role = forms.ChoiceField(
+        choices=TaskRole.choices,
+        label="Vai trò cần đổi",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    new_assignee = forms.ModelChoiceField(
+        queryset=Membership.objects.none(),
+        label="Người nhận mới",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    reason = forms.CharField(
+        max_length=2000,
+        label="Lý do bàn giao",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 2,
+                "placeholder": "Nhập lý do đổi người phân công (bắt buộc)...",
+            }
+        ),
+    )
+    expected_row_version = forms.IntegerField(
+        widget=forms.HiddenInput(),
+    )
+    idempotency_key = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput(),
+    )
+
+    def __init__(self, *args, workspace=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if workspace:
+            self.fields["new_assignee"].queryset = (
+                Membership.objects.filter(workspace=workspace, status=MembershipStatus.ACTIVE)
+                .select_related("user")
+                .order_by("user__first_name", "user__email")
+            )
+            self.fields["new_assignee"].label_from_instance = (
+                lambda m: f"{m.user.get_full_name() or m.user.username} ({m.get_access_role_display()})"
+            )
+
+    def clean_reason(self) -> str:
+        r = (self.cleaned_data.get("reason") or "").strip()
+        if not r:
+            raise forms.ValidationError("Lý do bàn giao bắt buộc phải được cung cấp.")
+        return r
+
+
+class MemberDeactivateForm(forms.Form):
+    """Form vô hiệu hóa thành viên kèm chỉ định người thay thế (Spec AC11, B08)."""
+
+    replacement_membership = forms.ModelChoiceField(
+        queryset=Membership.objects.none(),
+        required=False,
+        label="Người nhận thay thế",
+        widget=forms.Select(attrs={"class": "form-control"}),
+        help_text="Chọn thành viên đang hoạt động hoặc Chủ workspace để nhận bàn giao trách nhiệm.",
+    )
+    reason = forms.CharField(
+        required=False,
+        max_length=2000,
+        label="Lý do thu hồi / ghi chú bàn giao",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 2,
+                "placeholder": "Nhập lý do vô hiệu hóa thành viên (tùy chọn)...",
+            }
+        ),
+    )
+
+    def __init__(self, *args, workspace=None, exclude_membership=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if workspace:
+            qs = (
+                Membership.objects.filter(workspace=workspace, status=MembershipStatus.ACTIVE)
+                .select_related("user")
+                .order_by("user__first_name", "user__email")
+            )
+            if exclude_membership:
+                qs = qs.exclude(id=exclude_membership.id)
+            self.fields["replacement_membership"].queryset = qs
+            self.fields["replacement_membership"].label_from_instance = (
+                lambda m: f"{m.user.get_full_name() or m.user.username} ({m.get_access_role_display()})"
+            )
+
+

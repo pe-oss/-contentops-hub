@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Vô hiệu hóa Thành viên — {{ target_member.user.username }}{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 720px; margin: 30px auto; padding: 0 16px;">
+  <div style="margin-bottom: 16px;">
+    <a href="{% url 'workspaces:members' workspace.id %}" style="text-decoration: none; color: #4b5563; font-size: 14px;">
+      &larr; Quay lại danh sách thành viên
+    </a>
+  </div>
+
+  <div class="card" style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 24px;">
+    <h2 style="margin-top: 0; margin-bottom: 8px; font-size: 20px;">
+      Vô hiệu hóa: <strong>{{ target_member.user.get_full_name|default:target_member.user.username }}</strong>
+    </h2>
+    <p class="muted" style="margin-top: 0; margin-bottom: 20px; font-size: 14px; color: #6b7280;">
+      Email: {{ target_member.user.email }} &bull; Hình thức: {{ target_member.get_employment_type_display }}
+    </p>
+
+    {% if form.non_field_errors %}
+      <div class="alert" style="background: #fef2f2; border: 1px solid #f87171; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 14px;">
+        {% for err in form.non_field_errors %}
+          <div>&bull; {{ err }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if has_responsibilities %}
+      <div style="background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 14px;">
+        <strong>⚠️ Cần bàn giao trách nhiệm mở (Spec AC11)</strong><br>
+        Thành viên này đang có công việc mở. Vui lòng chọn người thay thế để bàn giao nguyên tử trong cùng giao dịch.
+      </div>
+
+      {% if open_tasks %}
+        <div style="margin-bottom: 16px;">
+          <h4 style="margin: 0 0 8px 0; font-size: 14px;">Nhiệm vụ đang mở ({{ open_tasks|length }}):</h4>
+          <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #4b5563;">
+            {% for t in open_tasks %}
+              <li><strong>[{{ t.get_role_display }}]</strong> {{ t.item.title }} (Hạn: {{ t.due_at|date:"d/m/Y H:i" }})</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      {% if assigned_items %}
+        <div style="margin-bottom: 16px;">
+          <h4 style="margin: 0 0 8px 0; font-size: 14px;">Bài viết được phân công ({{ assigned_items|length }}):</h4>
+          <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #4b5563;">
+            {% for it in assigned_items %}
+              <li><strong>{{ it.title }}</strong> &bull; Gói: {{ it.package.name }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      {% if coord_packages %}
+        <div style="margin-bottom: 16px;">
+          <h4 style="margin: 0 0 8px 0; font-size: 14px;">Gói đang điều phối ({{ coord_packages|length }}):</h4>
+          <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #4b5563;">
+            {% for p in coord_packages %}
+              <li><strong>{{ p.name }}</strong> ({{ p.channel }})</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+    {% else %}
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 14px;">
+        ✓ Thành viên này không có nhiệm vụ mở. Có thể vô hiệu hóa trực tiếp.
+      </div>
+    {% endif %}
+
+    <form method="post" action="{% url 'workspaces:member_deactivate' workspace.id target_member.id %}">
+      {% csrf_token %}
+
+      {% if has_responsibilities %}
+        <div style="margin-bottom: 16px;">
+          <label for="{{ form.replacement_membership.id_for_label }}" style="display: block; font-weight: 500; font-size: 14px; margin-bottom: 6px;">
+            {{ form.replacement_membership.label }} <span style="color: #dc2626;">*</span>
+          </label>
+          {{ form.replacement_membership }}
+          {% if form.replacement_membership.errors %}
+            <div style="color: #dc2626; font-size: 13px; margin-top: 4px;">{{ form.replacement_membership.errors }}</div>
+          {% endif %}
+          <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">{{ form.replacement_membership.help_text }}</div>
+        </div>
+      {% endif %}
+
+      <div style="margin-bottom: 20px;">
+        <label for="{{ form.reason.id_for_label }}" style="display: block; font-weight: 500; font-size: 14px; margin-bottom: 6px;">
+          {{ form.reason.label }}
+        </label>
+        {{ form.reason }}
+        {% if form.reason.errors %}
+          <div style="color: #dc2626; font-size: 13px; margin-top: 4px;">{{ form.reason.errors }}</div>
+        {% endif %}
+      </div>
+
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <button type="submit" class="btn" style="background: #dc2626; color: #ffffff; padding: 8px 16px; border-radius: 6px;" onclick="return confirm('Xác nhận vô hiệu hóa thành viên này?');">
+          Xác nhận vô hiệu hóa
+        </button>
+        <a href="{% url 'workspaces:members' workspace.id %}" class="btn" style="background: #f3f4f6; color: #374151; padding: 8px 16px; border-radius: 6px; text-decoration: none;">
+          Hủy bỏ
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

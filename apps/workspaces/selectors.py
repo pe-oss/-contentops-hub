@@ -176,7 +176,7 @@ def get_brand_profile(workspace: Workspace) -> BrandProfile | None:
         return None
     return BrandProfile.objects.filter(workspace=workspace).select_related("updated_by").first()
 
-from .models import ContentApproval, ContentItem, ContentPublication, ContentVersion, Package, ReviewDecision, Task
+from .models import AssignmentHistory, ContentApproval, ContentItem, ContentPublication, ContentVersion, Package, PackageStatus, ReviewDecision, Task, TaskStatus
 
 
 def get_item_publications(item: ContentItem) -> QuerySet[ContentPublication]:
@@ -336,5 +336,71 @@ def get_item_tasks(item: ContentItem) -> QuerySet[Task]:
         Task.objects.filter(item=item)
         .select_related("assignee_membership__user")
         .order_by("role")
+    )
+
+
+
+def get_item_assignment_history(item: ContentItem) -> QuerySet[AssignmentHistory]:
+    """
+    Lấy toàn bộ lịch sử bàn giao/đổi người của bài viết (Spec F07, 7 UI05, 9, 13 B08),
+    sắp xếp mới nhất trước.
+    """
+    return (
+        AssignmentHistory.objects.filter(item=item)
+        .select_related(
+            "previous_assignee__user",
+            "new_assignee__user",
+            "reassigned_by",
+            "task",
+        )
+        .order_by("-created_at")
+    )
+
+
+def get_member_open_tasks(membership: Membership) -> QuerySet[Task]:
+    """
+    Lấy toàn bộ nhiệm vụ đang mở (WAITING, READY, IN_PROGRESS) của một thành viên (Spec AC11).
+    """
+    return (
+        Task.objects.filter(
+            assignee_membership=membership,
+            status__in=[TaskStatus.WAITING, TaskStatus.READY, TaskStatus.IN_PROGRESS],
+        )
+        .select_related("item", "item__package")
+        .order_by("due_at", "created_at")
+    )
+
+
+def get_member_assigned_items(membership: Membership) -> QuerySet[ContentItem]:
+    """
+    Lấy các bài viết chưa kết thúc (không CANCELLED) mà thành viên được phân công làm
+    người viết, biên tập, hoặc xuất bản (Spec AC11).
+    """
+    from django.db.models import Q
+    from .models import ContentItemState
+    return (
+        ContentItem.objects.filter(
+            Q(writer_membership=membership)
+            | Q(editor_membership=membership)
+            | Q(publisher_membership=membership),
+            workspace=membership.workspace,
+        )
+        .exclude(state=ContentItemState.CANCELLED)
+        .select_related("package")
+        .order_by("created_at")
+    )
+
+
+def get_member_coordinated_packages(membership: Membership) -> QuerySet[Package]:
+    """
+    Lấy các gói nội dung đang mở (DRAFT hoặc ACTIVE) mà thành viên đang làm điều phối (Spec AC11).
+    """
+    return (
+        Package.objects.filter(
+            coordinator_membership=membership,
+            workspace=membership.workspace,
+            status__in=[PackageStatus.DRAFT, PackageStatus.ACTIVE],
+        )
+        .order_by("created_at")
     )
 

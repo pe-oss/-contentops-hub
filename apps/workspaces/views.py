@@ -509,19 +509,99 @@ class MemberEditView(View):
 
 @method_decorator(login_required, name="dispatch")
 class MemberDeactivateView(View):
-    def post(self, request, workspace_id, membership_id):
+    """
+    Vô hiệu hóa thành viên và bàn giao trách nhiệm (Spec mục 3.2, AC11, B08).
+    - GET: Hiển thị tóm tắt trách nhiệm mở (Task, Item, Gói) và form chọn người thay thế.
+    - POST: Thực hiện bàn giao nguyên tử và vô hiệu hóa thành viên.
+    """
+    def get(self, request, workspace_id, membership_id):
         workspace, membership = get_workspace_for_user(request.user, workspace_id)
-        if membership.access_role != AccessRole.OWNER:
+        if membership.access_role != AccessRole.OWNER and workspace.owner_user_id != request.user.id:
             raise PermissionDenied("Chỉ Chủ workspace mới có quyền vô hiệu hóa thành viên.")
 
         target = get_membership_by_id_for_workspace(workspace, membership_id)
-        try:
-            deactivate_membership(user=request.user, workspace=workspace, membership=target)
-            messages.success(request, f"Đã vô hiệu hóa thành viên {target.user.username}.")
-        except (ValidationError, PermissionDenied) as err:
-            messages.error(request, str(err))
+        if target.access_role == AccessRole.OWNER or target.user_id == workspace.owner_user_id:
+            messages.error(request, "Không thể vô hiệu hóa Chủ workspace.")
+            return redirect("workspaces:members", workspace_id=workspace.id)
 
-        return redirect("workspaces:members", workspace_id=workspace.id)
+        open_tasks = get_member_open_tasks(target)
+        assigned_items = get_member_assigned_items(target)
+        coord_packages = get_member_coordinated_packages(target)
+        has_responsibilities = bool(open_tasks or assigned_items or coord_packages)
+
+        form = MemberDeactivateForm(workspace=workspace, exclude_membership=target)
+        return render(
+            request,
+            "workspaces/member_deactivate.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "target_member": target,
+                "open_tasks": open_tasks,
+                "assigned_items": assigned_items,
+                "coord_packages": coord_packages,
+                "has_responsibilities": has_responsibilities,
+                "form": form,
+            },
+        )
+
+    def post(self, request, workspace_id, membership_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        if membership.access_role != AccessRole.OWNER and workspace.owner_user_id != request.user.id:
+            raise PermissionDenied("Chỉ Chủ workspace mới có quyền vô hiệu hóa thành viên.")
+
+        target = get_membership_by_id_for_workspace(workspace, membership_id)
+        if target.access_role == AccessRole.OWNER or target.user_id == workspace.owner_user_id:
+            messages.error(request, "Không thể vô hiệu hóa Chủ workspace.")
+            return redirect("workspaces:members", workspace_id=workspace.id)
+
+        form = MemberDeactivateForm(request.POST, workspace=workspace, exclude_membership=target)
+        replacement = None
+        reason = (request.POST.get("reason") or "").strip()
+        if form.is_valid():
+            replacement = form.cleaned_data.get("replacement_membership")
+            reason = form.cleaned_data.get("reason", "")
+        else:
+            rep_id = request.POST.get("replacement_membership")
+            if rep_id:
+                try:
+                    replacement = Membership.objects.get(id=rep_id, workspace=workspace)
+                except (Membership.DoesNotExist, ValueError):
+                    replacement = None
+
+        try:
+            deactivate_membership(
+                user=request.user,
+                workspace=workspace,
+                membership=target,
+                replacement_membership=replacement,
+                reason=reason,
+            )
+            messages.success(request, f"Đã vô hiệu hóa thành viên {target.user.username} thành công.")
+            return redirect("workspaces:members", workspace_id=workspace.id)
+        except (ValidationError, PermissionDenied) as err:
+            err_msg = err.message if hasattr(err, "message") else str(err)
+            form.add_error(None, err_msg)
+            open_tasks = get_member_open_tasks(target)
+            assigned_items = get_member_assigned_items(target)
+            coord_packages = get_member_coordinated_packages(target)
+            has_responsibilities = bool(open_tasks or assigned_items or coord_packages)
+            messages.error(request, err_msg)
+            return render(
+                request,
+                "workspaces/member_deactivate.html",
+                {
+                    "workspace": workspace,
+                    "membership": membership,
+                    "target_member": target,
+                    "open_tasks": open_tasks,
+                    "assigned_items": assigned_items,
+                    "coord_packages": coord_packages,
+                    "has_responsibilities": has_responsibilities,
+                    "form": form,
+                },
+                status=400,
+            )
 
 
 @method_decorator(login_required, name="dispatch")
@@ -658,6 +738,7 @@ from .forms import (
     OwnerApproveItemForm, OwnerRequestChangesForm, WithdrawReviewForm,
     ReopenItemForm, CancelContentItemForm, BlockContentItemForm,
     RecordPublicationForm, EditPublicationMetadataForm,
+    ReassignAssignmentForm, MemberDeactivateForm,
 )
 from .models import ContentItemState, PackageStatus, TaskRole, TaskStatus
 from .selectors import (
@@ -668,6 +749,10 @@ from .selectors import (
     get_item_for_workspace,
     get_item_tasks,
     get_item_versions,
+    get_item_assignment_history,
+    get_member_open_tasks,
+    get_member_assigned_items,
+    get_member_coordinated_packages,
     get_my_tasks_for_workspace,
     get_package_for_workspace,
     get_package_items,
@@ -684,6 +769,7 @@ from .services import (
     unblock_content_item,
     record_content_publication,
     update_publication_metadata,
+    reassign_item_assignment,
     approve_plan,
     create_package,
     create_editor_version,
@@ -714,13 +800,16 @@ def _render_item_detail(
     active_approval = get_item_active_approval(item)
     publications = get_item_publications(item)
     tasks = get_item_tasks(item)
-    is_owner = (membership.access_role == AccessRole.OWNER)
+    assignment_histories = get_item_assignment_history(item)
+    is_owner = (membership.access_role == AccessRole.OWNER) or (workspace.owner_user_id == request.user.id)
+    is_coordinator = (package.coordinator_membership_id == membership.id)
     is_writer = (item.writer_membership_id == membership.id)
     is_editor = (item.editor_membership_id == membership.id)
     is_publisher = (item.publisher_membership_id == membership.id)
     can_write = is_owner or is_writer
     can_edit = is_owner or is_editor
     can_publish = is_owner or is_publisher
+    can_reassign = is_owner or is_coordinator
     brief_copy_text = format_brief_for_copy(item)
 
     default_urls_text = "\n".join(item.draft_reference_urls) if item.draft_reference_urls else ""
@@ -739,10 +828,21 @@ def _render_item_detail(
         "is_writer": is_writer,
         "is_editor": is_editor,
         "is_publisher": is_publisher,
+        "is_coordinator": is_coordinator,
         "can_write": can_write,
         "can_edit": can_edit,
         "can_publish": can_publish,
+        "can_reassign": can_reassign,
+        "assignment_histories": assignment_histories,
         "brief_copy_text": brief_copy_text,
+        "reassign_form": ReassignAssignmentForm(
+            workspace=workspace,
+            initial={
+                "role": TaskRole.WRITE,
+                "expected_row_version": item.row_version,
+                "idempotency_key": f"reassign_{item.id}_{item.row_version}",
+            },
+        ),
         "draft_form": ContentDraftForm(initial={
             "text": item.draft_text,
             "reference_urls_text": default_urls_text,
@@ -940,6 +1040,67 @@ class ContentPublicationEditView(View):
             return _render_item_detail(
                 request, workspace, membership, package, item,
                 context_extra={"edit_publication_form": form},
+                status=400,
+            )
+
+
+
+@method_decorator(login_required, name="dispatch")
+class ContentItemReassignView(View):
+    """Đổi người phân công bài viết (Spec F07, 6.1, 6.3, 7 UI05, 10, 13 B08, AC10, AC12)."""
+    def post(self, request, workspace_id, package_id=None, item_id=None):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        item = get_item_for_workspace(workspace, item_id)
+        package = item.package
+
+        form = ReassignAssignmentForm(request.POST, workspace=workspace)
+        if not form.is_valid():
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"reassign_form": form},
+                status=400,
+            )
+
+        role = form.cleaned_data["role"]
+        new_assignee = form.cleaned_data["new_assignee"]
+        reason = form.cleaned_data["reason"]
+        exp_row = form.cleaned_data.get("expected_row_version")
+        idemp_key = form.cleaned_data.get("idempotency_key")
+
+        try:
+            assignment, updated_item = reassign_item_assignment(
+                user=request.user,
+                item=item,
+                role=role,
+                new_assignee_membership=new_assignee,
+                reason=reason,
+                expected_row_version=exp_row,
+                idempotency_key=idemp_key,
+            )
+            messages.success(
+                request,
+                f"Đã bàn giao vai trò '{assignment.get_role_display()}' cho {new_assignee.user.username} thành công.",
+            )
+            return redirect(
+                "workspaces:item_detail",
+                workspace_id=workspace.id,
+                package_id=package.id,
+                item_id=item.id,
+            )
+        except ConcurrencyConflictError as exc:
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"reassign_form": form, "conflict_error": str(exc)},
+                status=409,
+            )
+        except PermissionDenied as exc:
+            raise PermissionDenied(str(exc))
+        except ValidationError as exc:
+            err_msg = exc.message if hasattr(exc, "message") else str(exc)
+            form.add_error(None, err_msg)
+            return _render_item_detail(
+                request, workspace, membership, package, item,
+                context_extra={"reassign_form": form},
                 status=400,
             )
 

@@ -111,7 +111,7 @@ class BrandProfileAdmin(admin.ModelAdmin):
     list_filter = ("revision", "updated_at")
     search_fields = ("name", "workspace__name", "product_summary")
     readonly_fields = ("id", "revision", "created_at", "updated_at")
-from .models import ContentApproval, ContentItem, ContentPublication, ContentVersion, Package, PlanApproval, ReviewDecision, Task
+from .models import AssignmentHistory, ContentApproval, ContentItem, ContentPublication, ContentVersion, Package, PlanApproval, ReviewDecision, Task
 
 
 class ContentItemInline(admin.TabularInline):
@@ -184,4 +184,13 @@ class ContentPublicationAdmin(admin.ModelAdmin):
     list_filter = ("published_at", "recorded_at")
     search_fields = ("item__title", "url", "recorded_by__username")
     readonly_fields = ("id", "workspace", "item", "version", "approval", "recorded_at")
+
+
+
+@admin.register(AssignmentHistory)
+class AssignmentHistoryAdmin(admin.ModelAdmin):
+    list_display = ("role", "item", "package", "previous_assignee", "new_assignee", "reassigned_by", "created_at")
+    list_filter = ("role", "created_at")
+    search_fields = ("item__title", "package__name", "previous_assignee__user__username", "new_assignee__user__username", "reason")
+    readonly_fields = ("id", "workspace", "package", "item", "task", "role", "previous_assignee", "new_assignee", "reassigned_by", "reason", "idempotency_key", "created_at")
 

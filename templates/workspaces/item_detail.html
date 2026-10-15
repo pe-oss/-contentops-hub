@@ -131,6 +131,47 @@
           <span class="badge" style="font-size: 11px;">{{ t.get_status_display }}</span>
         {% endif %}{% endfor %}
       </div>
+    {% if can_reassign and item.state != "CANCELLED" %}
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #cbd5e1;">
+        <details {% if reassign_form.errors or conflict_error %}open{% endif %}>
+          <summary style="font-size: 13px; font-weight: 500; color: #2563eb; cursor: pointer;">
+            🔄 Đổi người phân công (Chủ / Điều phối)
+          </summary>
+          <form method="post" action="{% url 'workspaces:item_assignments' workspace.id package.id item.id %}" style="margin-top: 10px; background: #f0f9ff; padding: 14px; border-radius: 6px; border: 1px solid #bae6fd;">
+            {% csrf_token %}
+            {{ reassign_form.expected_row_version }}
+            {{ reassign_form.idempotency_key }}
+
+            {% if reassign_form.errors %}
+              <div style="background: #fef2f2; border: 1px solid #f87171; color: #991b1b; padding: 10px; border-radius: 4px; margin-bottom: 12px; font-size: 13px;">
+                {% for field, errors in reassign_form.errors.items %}
+                  {% for err in errors %}<div>&bull; {{ err }}</div>{% endfor %}
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 10px;">
+              <div>
+                <label style="font-size: 12px; font-weight: 500;">Vai trò cần đổi:</label>
+                {{ reassign_form.role }}
+              </div>
+              <div>
+                <label style="font-size: 12px; font-weight: 500;">Người nhận mới:</label>
+                {{ reassign_form.new_assignee }}
+              </div>
+            </div>
+            <div style="margin-bottom: 10px;">
+              <label style="font-size: 12px; font-weight: 500;">Lý do bàn giao (bắt buộc):</label>
+              {{ reassign_form.reason }}
+            </div>
+            <button type="submit" class="btn" style="background: #2563eb; color: white; font-size: 13px; font-weight: 500;" onclick="return confirm('Xác nhận đổi người phân công cho bài viết này?');">
+              Xác nhận đổi người
+            </button>
+          </form>
+        </details>
+      </div>
+    {% endif %}
+
     </div>
   </div>
 
@@ -620,5 +661,29 @@
       </div>
     </div>
   {% endif %}
+  <!-- LỊCH SỬ BÀN GIAO PHÂN CÔNG (ASSIGNMENT HISTORY - B08) -->
+  {% if assignment_histories %}
+    <div class="card" style="margin-top: 24px;">
+      <h3 style="margin-top: 0; margin-bottom: 16px;">Lịch sử bàn giao phân công ({{ assignment_histories.count }})</h3>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        {% for ah in assignment_histories %}
+          <div style="border-left: 3px solid #3b82f6; padding: 10px 14px; background: #f8fafc; border-radius: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="badge" style="background: #dbeafe; color: #1e40af; font-size: 11px;">{{ ah.get_role_display }}</span>
+                <strong style="margin-left: 6px;">{{ ah.previous_assignee.user.get_full_name|default:ah.previous_assignee.user.username }}</strong>
+                <span style="color: #6b7280;">&rarr;</span>
+                <strong style="color: #1d4ed8;">{{ ah.new_assignee.user.get_full_name|default:ah.new_assignee.user.username }}</strong>
+              </div>
+              <span class="muted" style="font-size: 12px;">{{ ah.created_at|date:"H:i d/m/Y" }}</span>
+            </div>
+            <p style="margin: 6px 0 2px 0; font-size: 13px;"><strong>Lý do:</strong> {{ ah.reason }}</p>
+            <p class="muted" style="margin: 2px 0 0 0; font-size: 12px;">Người thực hiện: <strong>{{ ah.reassigned_by.get_full_name|default:ah.reassigned_by.username }}</strong></p>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
 </section>
 {% endblock %}
