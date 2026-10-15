@@ -325,7 +325,7 @@
         <p style="margin: 0 0 16px 0; font-size: 14px;">Biên tập viên đã hoàn thành checklist và nộp bài. Chủ xem xét phiên bản mới nhất <strong>v{{ item.latest_version.version_no }}</strong>.</p>
 
         {% if is_owner %}
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
+          <div class="responsive-two-cols" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 12px;">
             <!-- PHÊ DUYỆT -->
             <div style="background: white; border: 1px solid #a855f7; border-radius: 6px; padding: 14px;">
               <h5 style="margin: 0 0 8px 0; color: #6b21a8;">1. Phê duyệt phiên bản v{{ item.latest_version.version_no }}</h5>
@@ -335,7 +335,7 @@
                 <input type="hidden" name="expected_version_id" value="{{ item.latest_version_id }}">
                 <input type="hidden" name="expected_row_version" value="{{ item.row_version }}">
                 <input type="hidden" name="idempotency_key" value="approve_{{ item.id }}_{{ item.latest_version_id }}">
-                <button type="submit" class="btn btn-primary" style="background: #7c3aed; border-color: #7c3aed;" onclick="return confirm('Xác nhận phê duyệt phiên bản v{{ item.latest_version.version_no }} của bài viết này?');">
+                <button type="submit" class="btn btn-primary" style="background: #7c3aed; border-color: #7c3aed; width: 100%; white-space: normal; line-height: 1.3;" onclick="return confirm('Xác nhận phê duyệt phiên bản v{{ item.latest_version.version_no }} của bài viết này?');">
                   ✅ Duyệt bài viết (Chuyển READY_TO_PUBLISH)
                 </button>
               </form>

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}403 — Từ chối truy cập{% endblock %}
+
+{% block content %}
+<section class="error-page">
+  <div class="card">
+    <div class="error-code error-code-403">403</div>
+    <h1 class="error-title">Truy cập bị từ chối</h1>
+    <p class="error-description">
+      Bạn không có quyền thực hiện thao tác này hoặc truy cập vào tài nguyên được yêu cầu. Nếu bạn cho rằng đây là sự nhầm lẫn, vui lòng liên hệ Chủ workspace để được phân quyền.
+    </p>
+    <div class="error-actions">
+      <a href="javascript:history.back()" class="btn">← Quay lại trang trước</a>
+      <a href="{% url 'workspaces:list' %}" class="btn btn-primary">Danh sách Workspace</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

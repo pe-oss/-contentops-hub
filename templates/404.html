@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}404 — Không tìm thấy trang{% endblock %}
+
+{% block content %}
+<section class="error-page">
+  <div class="card">
+    <div class="error-code error-code-404">404</div>
+    <h1 class="error-title">Không tìm thấy trang</h1>
+    <p class="error-description">
+      Trang hoặc tài nguyên bạn đang tìm kiếm không tồn tại, đã bị di chuyển hoặc bạn không có quyền xem trong không gian làm việc này.
+    </p>
+    <div class="error-actions">
+      <a href="javascript:history.back()" class="btn">← Quay lại trang trước</a>
+      <a href="{% url 'workspaces:list' %}" class="btn btn-primary">Danh sách Workspace</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}409 — Xung đột phiên bản dữ liệu{% endblock %}
+
+{% block content %}
+<section class="error-page">
+  <div class="card">
+    <div class="error-code error-code-409">409</div>
+    <h1 class="error-title">Xung đột phiên bản dữ liệu (Conflict)</h1>
+    <p class="error-description">
+      Dữ liệu bạn đang thao tác đã được cập nhật bởi một người dùng khác hoặc ở một phiên làm việc khác trong thời gian bạn mở trang. Để đảm bảo toàn vẹn dữ liệu, thay đổi của bạn chưa được lưu đè.
+    </p>
+    {% if error_message %}
+      <div class="form-alert" style="margin-bottom: 20px; text-align: left; background: #fdf4ff; border-color: #f0abfc; color: #86198f;">
+        <strong>Chi tiết:</strong> {{ error_message }}
+      </div>
+    {% endif %}
+    <div class="error-actions">
+      <a href="javascript:location.reload()" class="btn">🔄 Tải lại trang mới nhất</a>
+      <a href="javascript:history.back()" class="btn">← Quay lại</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

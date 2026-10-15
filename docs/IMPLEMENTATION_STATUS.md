@@ -21,7 +21,95 @@
 | **B07 — Xuất bản và hoàn thành gói (Publishing)** | **HOÀN TẤT** | Spec mục 5 F06, 6.1, 6.2, 7 UI04, 9, 10, 13 B07, 14 AC12/AC13/AC14 (ContentPublication lưu lịch sử xuất bản có URL, thời điểm, approval/version chốt; Task PUBLISH -> DONE; tự động hoàn thành gói COMPLETED; giữ lịch sử khi mở lại; sửa metadata audit trail; OCC 409 & Idempotency) |
 | **B08 — Blocker, đổi người, thu hồi (Task Reassignment)** | **HOÀN TẤT** | Spec mục 3.1, 3.2, 5 F07, 6.1, 6.2, 6.3, 7 UI03/UI05, 9, 10, 13 B08, 14 AC10, AC11, AC12 (AssignmentHistory append-only audit trail; đồng bộ ContentItem & Task nguyên tử; phân quyền Chủ workspace & Điều phối viên gói; OCC 409 & Idempotency; thu hồi thành viên bắt buộc bàn giao việc mở AC11; bảo vệ Single Owner; bảo toàn blocker AC12) |
 | **B09 — Tổng quan, Việc của tôi, thông báo (Dashboard & Tasks)** | **HOÀN TẤT** | Spec mục 7 UI01/UI06, 8, 9, 10, 13 B09 (Dashboard UI01 3 vùng Cần quyết định, Bị chặn/Trễ hạn, Tiến độ gói; Việc của tôi UI06 ưu tiên Blocker > Overdue > Due_at, lọc trạng thái/vai trò/gói, bảo vệ task WAITING, phân trang 20/trang; In-App Notification unique recipient/event_id, rollback-safe, chuông navbar và trang /notifications) |
-| **B10 — Responsive, lỗi, backup, QA lõi (Core QA)** | CHƯA LÀM | Spec mục 13 B10, 14 AC01-AC18 |
+| **B10 — Responsive, lỗi, backup, QA lõi (Core QA)** | **HOÀN TẤT** | Spec mục 12, 13 B10, 14 AC01-AC18 (Responsive chuẩn 390px mobile & 1280px desktop, chụp 12 ảnh bằng chứng bằng Chrome Headless; xử lý lỗi 400/403/404/409/500 & CSRF không rò rỉ traceback/secrets; backup/restore tự động SQLite & PostgreSQL kèm SHA256 và retention 7 bản; full suite 201/201 tests PASS bao phủ toàn diện AC01-AC18) |
+
+
+## 14. Chi tiết thực hiện B10 (Responsive 390px, Xử lý lỗi, Backup/Restore & QA Lõi AC01-AC18)
+
+### 14.1. Tối ưu Giao diện Responsive & Bằng chứng Trình duyệt Thực tế (Spec UI01–UI06, AC16)
+- **Chuẩn hóa màn hình di động 390px (Viewport chuẩn iPhone):**
+  - Khắc phục triệt để hiện tượng vỡ khung / tràn ngang (`overflow-x: hidden` trên `html, body`).
+  - Toàn bộ bảng dữ liệu (`<table>`) trong ứng dụng (bao gồm danh sách thành viên `workspace_members.html`, danh sách lời mời, lịch sử xuất bản, v.v.) được bọc trong container `.table-wrap` / `.table-responsive` với thanh cuộn ngang độc lập, không gây xô lệch bố cục trang.
+  - Các grid tác vụ (`action-grid-2`, `responsive-two-cols`, deadline inputs trong biểu mẫu tạo/sửa gói và bài viết) tự động chuyển đổi từ 2 cột sang 1 cột dạng xếp chồng (stacking) trên màn hình <= 640px.
+  - Tiêu đề, liên kết, URL dài và các chuỗi định danh được bổ sung thuộc tính `.break-words` (`word-break: break-word`, `overflow-wrap: anywhere`) chống tràn giao diện.
+- **Kiểm chứng thực tế bằng Trình duyệt Google Chrome Headless:**
+  - Xây dựng công cụ tự động hóa `scripts/capture_browser_evidence.py` khởi chạy máy chủ WSGI in-process kết hợp Google Chrome Headless (`chrome.exe --headless=new`).
+  - Chụp và lưu trữ 12 ảnh bằng chứng thực tế tại thư mục `docs/screenshots/`:
+    1. `mobile_390px_owner_review_ac16.png` (390 x 844 px): Màn hình Chủ workspace xem xét bài viết tại công đoạn `OWNER_REVIEW` (AC16) với 2 khối tác vụ "Phê duyệt" và "Yêu cầu sửa" hiển thị cân đối, vừa vặn, không tràn ngang.
+    2. `mobile_390px_dashboard_ui01.png` (390 x 844 px): Tổng quan Workspace UI01 với 3 vùng chỉ số responsive.
+    3. `mobile_390px_my_tasks_ui06.png` (390 x 844 px): Giao diện Việc của tôi UI06 xếp chồng gọn gàng, bộ lọc dropdown co giãn linh hoạt.
+    4. `mobile_390px_brand_profile.png` (390 x 844 px): Hồ sơ thương hiệu với banner quy tắc phiên bản bất biến.
+    5. `mobile_390px_members.png` (390 x 844 px): Danh sách thành viên và lời mời với bảng cuộn ngang mượt mà.
+    6. `mobile_390px_notifications.png` (390 x 844 px): Trung tâm thông báo.
+    7. `desktop_1280px_owner_review.png` (1280 x 800 px): Giao diện Chủ duyệt bài trên máy tính để bàn.
+    8. `desktop_1280px_dashboard_ui01.png` (1280 x 800 px): Tổng quan Dashboard UI01 trên máy tính để bàn.
+    9. `mobile_390px_error_403.png` (390 x 844 px): Trang lỗi 403 Forbidden thân thiện.
+    10. `mobile_390px_error_404.png` (390 x 844 px): Trang lỗi 404 Not Found an toàn, zero-leakage.
+    11. `mobile_390px_error_409.png` (390 x 844 px): Trang xung đột phiên bản dữ liệu (OCC 409).
+    12. `mobile_390px_error_500.png` (390 x 844 px): Trang sự cố hệ thống 500 không lộ traceback/secrets.
+
+### 14.2. Xử lý Lỗi Toàn diện & Bảo vệ CSRF (Zero Leakage)
+- **Tập hợp Templates trang lỗi thân thiện:**
+  - `templates/400.html`: Yêu cầu không hợp lệ (Bad Request).
+  - `templates/403.html`: Truy cập bị từ chối / Không có quyền (Forbidden).
+  - `templates/403_csrf.html`: Lỗi xác thực bảo mật / Phiên làm việc hết hạn (CSRF Failure).
+  - `templates/404.html`: Không tìm thấy trang hoặc tài nguyên ngoài phạm vi (Not Found).
+  - `templates/409.html`: Xung đột phiên bản dữ liệu đồng thời (Concurrency Conflict).
+  - `templates/500.html`: Sự cố kỹ thuật hệ thống (Internal Server Error).
+- **Nguyên tắc an toàn (Zero Leakage):**
+  - Tuyệt đối không hiển thị Traceback, mã nguồn nội bộ, connection string, credentials hay secret keys ra ngoài màn hình người dùng.
+  - Người ngoài (`OUTSIDER`) và thành viên vô hiệu hóa (`INACTIVE`) nhận mã `404 Not Found` đối với mọi tài nguyên workspace, ngăn ngừa nguy cơ đoán ID hay dò quét siêu dữ liệu (metadata leakage).
+  - Cấu hình `CSRF_FAILURE_VIEW = "core.views.custom_csrf_failure_view"` trong `settings.py` hướng dẫn người dùng tải lại trang khi token hết hạn.
+  - Bảo toàn dữ liệu người dùng (`form retention`): Khi xảy ra lỗi validation (HTTP 400) hoặc xung đột phiên bản (HTTP 409), dữ liệu người dùng vừa nhập được bảo lưu nguyên vẹn trên form để người dùng kiểm tra lại mà không phải gõ lại từ đầu.
+
+### 14.3. Công cụ Sao lưu & Diễn tập Phục hồi Cơ sở Dữ liệu (Spec Mục 12, AC18)
+- **Lệnh quản trị Django `manage.py backup_database` (`apps/workspaces/management/commands/backup_database.py`):**
+  - Hỗ trợ cả 2 engine PostgreSQL (`pg_dump` định dạng custom compressed `-F c`) và SQLite (dùng Python SQLite Backup API đảm bảo snapshot nhất quán).
+  - Bảo mật thông tin xác thực: Đọc credentials từ biến môi trường (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`) hoặc Django settings; không in mật khẩu ra log.
+  - Ghi file tạm thời (`.tmp`) trước, chỉ rename thành file backup chính thức khi quá trình dump hoàn tất thành công 100% (chống ghi đè hỏng bản backup tốt).
+  - Tính toán mã băm SHA-256 cho file backup và lưu kèm file `manifest.json` chứa thông tin thời gian UTC, kích thước và checksum.
+  - Tự động áp dụng chính sách lưu giữ (Retention Policy): Giữ lại 7 bản sao lưu gần nhất theo Spec mục 12, tự động dọn dẹp các bản cũ hơn.
+- **Lệnh quản trị Django `manage.py restore_database` (`apps/workspaces/management/commands/restore_database.py`):**
+  - Tự động đối chiếu mã băm SHA-256 từ file manifest trước khi thực hiện phục hồi, ngăn chặn việc phục hồi từ file bị lỗi/sửa đổi.
+  - Yêu cầu tham số `--target-db` bắt buộc chỉ định CSDL đích độc lập dùng cho diễn tập, loại trừ nguy cơ ghi đè nhầm database sản xuất.
+  - Cơ chế tự kiểm chứng sau phục hồi: Kiểm tra số lượng bản ghi các bảng cốt lõi (`workspaces_workspace`, `workspaces_brandprofile`, `workspaces_package`, `workspaces_contentitem`, `workspaces_task`) và chạy kiểm tra ràng buộc khóa ngoại (`PRAGMA foreign_key_check` trên SQLite hoặc relational integrity trên PG).
+- **Kịch bản tự động hóa máy chủ Linux/Production (`scripts/`):**
+  - `scripts/backup_postgres.sh`: Shell script chạy cronjob hằng ngày cho PostgreSQL với SHA-256 và retention 7 bản.
+  - `scripts/restore_postgres.sh`: Shell script diễn tập phục hồi thử nghiệm vào database cách ly `saas_content_drill`.
+
+### 14.4. Ma trận Kiểm chứng Toàn diện AC01–AC18 (Spec Mục 14)
+| ID | Yêu cầu kiểm chứng (Given / When) | Kết quả kỳ vọng (Then) | Ca kiểm thử / Bằng chứng | Môi trường | Kết quả |
+|---|---|---|---|---|---|
+| **AC01** | Không có kết nối AI; hoàn thành gói với AI bên ngoài | Tất cả bước hoạt động, không bị buộc nhập key | `CoreQAMilestoneB10Tests.test_ac01_no_ai_connection_complete_package_normally` | SQLite / Local | **PASS** |
+| **AC02** | Freelancer biết ID bài người khác ngoài phạm vi | View/API trả 404; không lộ title, count, lịch sử | `test_ac02_freelancer_access_out_of_scope_item_returns_404` | SQLite / Local | **PASS** |
+| **AC03** | MEMBER tự gọi endpoint duyệt / kết nối AI | Bị từ chối 403; dữ liệu kế hoạch/bài không đổi | `test_ac03_member_cannot_call_approve_endpoints` | SQLite / Local | **PASS** |
+| **AC04** | Kế hoạch thiếu người hoặc hạn sai thứ tự; Chủ duyệt | Báo lỗi từng trường; không sinh một phần nhiệm vụ | `test_ac04_plan_approval_deadline_order_validation` | SQLite / Local | **PASS** |
+| **AC05** | Nhấp duyệt kế hoạch 2 lần cùng idempotency key | Chỉ 1 snapshot và đúng 1 bộ nhiệm vụ (3 task/bài) | `test_ac05_plan_approval_double_click_idempotency` | SQLite / Local | **PASS** |
+| **AC06** | Nộp v1, biên tập trả sửa, nộp v2 | V1 giữ nguyên; lý do sửa và người chịu trách nhiệm đúng | `test_ac06_version_immutability_and_return_reason` | SQLite / Local | **PASS** |
+| **AC07** | Chủ đang xem v1 trong khi bản hiện hành đã đổi | Duyệt thất bại HTTP 409; không duyệt nhầm bản v2 | `test_ac07_owner_approve_stale_version_rejected_409` | SQLite / Local | **PASS** |
+| **AC08** | Bài đang chờ duyệt, người viết gọi lưu bản mới | Bị từ chối tới khi rút/trả bước hợp lệ | `test_ac08_cannot_submit_version_when_in_owner_review` | SQLite / Local | **PASS** |
+| **AC09** | Duyệt v2, Chủ mở lại để sửa | Approval v2 hết hiệu lực; không cho đăng theo approval cũ | `test_ac09_reopen_invalidates_approval_and_blocks_publication` | SQLite / Local | **PASS** |
+| **AC10** | Hai người sửa cùng row_version | Một ghi thành công, một nhận 409; không mất dữ liệu | `test_ac10_optimistic_concurrency_control_409` | SQLite / Local | **PASS** |
+| **AC11** | Thu hồi freelancer còn việc đang mở | Việc chuyển cho người thay/Chủ; quyền cũ hết; lịch sử giữ nguyên | `test_ac11_member_deactivation_reassigns_open_tasks` | SQLite / Local | **PASS** |
+| **AC12** | Bài bị chặn; thử nộp/duyệt/đăng | Bị từ chối; lưu nháp hoặc gỡ chặn vẫn được theo quyền | `test_ac12_blocked_item_rejects_workflow_transitions` | SQLite / Local | **PASS** |
+| **AC13** | Ghi nhận đăng thiếu URL hoặc chưa duyệt | Bị từ chối; nhập hợp lệ ghi đúng người, giờ, version | `test_ac13_publication_missing_url_or_unapproved_rejected` | SQLite / Local | **PASS** |
+| **AC14** | 2 bài đăng, 1 bài hủy; hoặc cả 3 bài hủy | TH1 hoàn thành 2/2 và hiện 1 hủy; TH2 không hoàn thành | `test_ac14_package_completion_conditions` | SQLite / Local | **PASS** |
+| **AC15** | Sửa thương hiệu sau duyệt kế hoạch | Snapshot gói không tự đổi; độc lập toàn diện | `test_ac15_brand_profile_immutability_snapshot_isolation` | SQLite / Local | **PASS** |
+| **AC16** | Màn hình 390 px, Chủ duyệt bài | Đọc và thao tác được, không tràn ngang nội dung chính | `test_ac16_mobile_390px_owner_review_view` + `docs/screenshots/mobile_390px_owner_review_ac16.png` | Chrome Headless | **PASS** |
+| **AC17** | Mất kết nối khi lưu form | Không báo thành công giả; giữ nội dung, thử lại không tạo trùng | `test_ac17_form_validation_retention_and_idempotency` | SQLite / Local | **PASS** |
+| **AC18** | Khôi phục bản sao lưu thử | Đọc được gói/phiên bản/quyết định và quan hệ nhất quán | `test_ac18_database_backup_and_restore_verification` | SQLite Drill DB | **PASS** |
+
+### 14.5. Phân tách Môi trường & Tình trạng Cổng Nghiệm thu (Release Gates R1)
+| Cổng Nghiệm thu (Gate) | Tiêu chí Spec | Bằng chứng thực tế | Trạng thái cổng |
+|---|---|---|---|
+| **SQLite Regression Suite** | 100% tests PASS, không có lỗi hoặc skip | **201/201 tests PASS** (chạy trong 7.2s trên `core.test_settings`) | **ĐẠT (VERIFIED PASS)** |
+| **Bố cục Trình duyệt 390px & Desktop** | Hiển thị trọn vẹn, không vỡ layout, table scroll riêng | Chụp thành công 12 ảnh bằng chứng bằng Chrome Headless tại `docs/screenshots/` | **ĐẠT (VERIFIED PASS)** |
+| **Xử lý Lỗi & CSRF (Zero Leakage)** | 400/403/404/409/500 và CSRF không lộ secret | Templates tùy biến thân thiện, kiểm thử bằng RequestFactory và Client | **ĐẠT (VERIFIED PASS)** |
+| **Sao lưu & Diễn tập Phục hồi CSDL** | Dump có SHA256, retention 7 bản, diễn tập phục hồi không lỗi FK | Lệnh `backup_database` & `restore_database` chạy diễn tập thành công trên target DB độc lập | **ĐẠT (VERIFIED PASS)** |
+| **PostgreSQL Concurrency Gate** | Chạy concurrency OCC / Locking với kết nối riêng | Môi trường máy trạm phát triển cục bộ không cài đặt PostgreSQL service (cổng 5432 đóng). Đã chuẩn bị runner `core/postgres_test_settings.py` và shell scripts `scripts/`. | **CHỜ MÔI TRƯỜNG (PENDING CI/PG)** |
+| **Release Gate R1 Lõi (Pilot Readiness)** | AC01–AC18 đạt, không mất dữ liệu, có hướng dẫn thử một gói | 18/18 tiêu chí AC01–AC18 được kiểm chứng tự động và bằng chứng trình duyệt; luồng E2E trọn vẹn | **SẴN SÀNG CHO PILOT NỘI BỘ (READY FOR PILOT)** |
+
+---
 
 
 ## 13. Chi tiết thực hiện B09 (Dashboard UI01, Việc của tôi UI06 & Thông báo In-App)

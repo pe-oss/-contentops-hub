@@ -69,7 +69,7 @@
 
       <h4 style="margin: 20px 0 12px 0; border-bottom: 1px solid var(--border); padding-bottom: 6px;">Thời hạn (Thứ tự: Viết &le; Biên tập &le; Duyệt &le; Đăng)</h4>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+      <div class="responsive-two-cols" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;">
         <div>
           <label for="{{ form.writing_deadline.id_for_label }}"><strong>{{ form.writing_deadline.label }}</strong> <span style="color: red;">*</span></label>
           {{ form.writing_deadline }}
@@ -82,7 +82,7 @@
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+      <div class="responsive-two-cols" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
         <div>
           <label for="{{ form.review_deadline.id_for_label }}"><strong>{{ form.review_deadline.label }}</strong> <span style="color: red;">*</span></label>
           {{ form.review_deadline }}

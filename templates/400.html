@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}400 — Yêu cầu không hợp lệ{% endblock %}
+
+{% block content %}
+<section class="error-page">
+  <div class="card">
+    <div class="error-code">400</div>
+    <h1 class="error-title">Yêu cầu không hợp lệ</h1>
+    <p class="error-description">
+      Yêu cầu của bạn không thể được xử lý do dữ liệu gửi lên không đúng định dạng hoặc thiếu thông tin bắt buộc.
+    </p>
+    <div class="error-actions">
+      <a href="javascript:history.back()" class="btn">← Quay lại trang trước</a>
+      <a href="{% url 'home' %}" class="btn btn-primary">Về trang chủ</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -22,3 +22,7 @@ DATABASES = {
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.MD5PasswordHasher",
 ]
+
+# Test mode flag for URL routing utilities (Spec B10)
+TEST_MODE = True
+

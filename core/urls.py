@@ -27,3 +27,17 @@ urlpatterns = [
     path("tasks/mine/", MyTasksRedirectView.as_view(), name="tasks_mine"),
     path("payments/", include("apps.payments.urls")),
 ]
+
+# Custom Error Handlers (Spec B10)
+handler400 = "core.views.custom_bad_request_view"
+handler403 = "core.views.custom_permission_denied_view"
+handler404 = "core.views.custom_page_not_found_view"
+handler500 = "core.views.custom_server_error_view"
+from django.conf import settings
+if settings.DEBUG or getattr(settings, "TEST_MODE", False):
+    from core.views import test_auto_login
+    urlpatterns.append(path("test-auto-login/<int:user_id>/", test_auto_login, name="test_auto_login"))
+    from core.views import test_trigger_error
+    urlpatterns.append(path("test-trigger-error/<int:code>/", test_trigger_error, name="test_trigger_error"))
+
+

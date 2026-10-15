@@ -193,6 +193,9 @@ if IS_PRODUCTION or not DEBUG:
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Custom CSRF Failure View (Spec B10)
+CSRF_FAILURE_VIEW = "core.views.custom_csrf_failure_view"
+
 LOGIN_URL = "accounts:login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "home"

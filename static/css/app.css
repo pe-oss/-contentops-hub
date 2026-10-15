@@ -98,5 +98,105 @@ th { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spa
 @media (max-width: 760px) {
   .nav-inner, .dashboard-header, .section-title { align-items: flex-start; flex-direction: column; }
   .nav-links { flex-wrap: wrap; }
-  .dashboard-grid, .two-cols { grid-template-columns: 1fr; }
+  .dashboard-grid, .two-cols, .responsive-two-cols { grid-template-columns: 1fr !important; }
+}
+
+/* Responsive & Mobile 390px Safeguards (Spec B10, UI01-UI06, AC16) */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.table-wrap, .table-responsive {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 12px;
+}
+
+.table-wrap table {
+  min-width: 100%;
+}
+
+.break-words {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+input, select, textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Error page styles */
+.error-page {
+  padding: 60px 0;
+  text-align: center;
+  max-width: 580px;
+  margin: 0 auto;
+}
+.error-code {
+  font-size: clamp(48px, 10vw, 84px);
+  font-weight: 900;
+  color: var(--primary);
+  line-height: 1;
+  margin: 0 0 12px 0;
+}
+.error-code-403 { color: #dc2626; }
+.error-code-404 { color: #f59e0b; }
+.error-code-409 { color: #8b5cf6; }
+.error-code-500 { color: #ef4444; }
+.error-title {
+  font-size: clamp(20px, 4vw, 28px);
+  font-weight: 700;
+  margin: 0 0 12px 0;
+}
+.error-description {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 0 0 24px 0;
+}
+.error-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .container {
+    width: calc(100% - 20px);
+    padding: 0 2px;
+  }
+  .card {
+    padding: 16px 12px;
+    border-radius: 12px;
+  }
+  .navbar {
+    padding: 8px 0;
+  }
+  .nav-inner {
+    gap: 8px;
+    min-height: auto;
+  }
+  .nav-links {
+    gap: 6px;
+    width: 100%;
+  }
+  .nav-links .btn {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  .btn {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .dashboard-header h1 {
+    font-size: 22px;
+  }
+  .stat-card strong {
+    font-size: 17px;
+  }
 }

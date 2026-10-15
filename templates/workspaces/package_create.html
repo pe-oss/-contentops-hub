@@ -43,7 +43,7 @@
         {% for error in form.coordinator_membership.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+      <div class="responsive-two-cols" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;">
         <div>
           <label for="{{ form.start_date.id_for_label }}"><strong>{{ form.start_date.label }}</strong> <span style="color: red;">*</span></label>
           {{ form.start_date }}
