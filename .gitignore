@@ -40,3 +40,6 @@ ngrok_requests.json
 # Backups
 backups/
 test_backups*/
+
+# Smoke testing
+docker-compose*.yml

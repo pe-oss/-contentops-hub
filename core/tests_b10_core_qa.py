@@ -603,7 +603,7 @@ class CoreQAMilestoneB10Tests(TestCase):
 
         try:
             # 1. Dùng lệnh backup_database trên file mẫu
-            with patch.dict(connection.settings_dict, {"NAME": str(sample_src_db)}):
+            with patch.dict(connection.settings_dict, {"ENGINE": "django.db.backends.sqlite3", "NAME": str(sample_src_db)}):
                 call_command("backup_database", output_dir=str(backup_dir), retention_count=5)
 
             backups = list(backup_dir.glob("backup_sqlite_*.sqlite3"))
