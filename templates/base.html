@@ -10,6 +10,7 @@
   <script defer src="{% static 'js/app.js' %}"></script>
 </head>
 <body>
+{% block app_shell %}
   <header class="navbar">
     <div class="container nav-inner">
       <a class="brand" href="{% url 'home' %}">SaaS Boilerplate</a>
@@ -52,11 +53,47 @@
   {% endif %}
 
   <main class="container">
+    {% if request.user.is_authenticated and current_workspace %}
+      <div class="apag-subnav" style="background: #ffffff; border: 1px solid var(--border); border-radius: 12px; padding: 10px 18px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; box-shadow: var(--card-shadow);">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <a href="{% url 'workspaces:detail' current_workspace.id %}" class="btn btn-sm {% if request.resolver_match.url_name == 'detail' or request.resolver_match.url_name == 'dashboard' %}btn-primary{% endif %}" style="padding: 6px 12px; font-size: 13px;">
+            📊 Tổng quan
+          </a>
+          <a href="{% url 'workspaces:package_list' current_workspace.id %}" class="btn btn-sm {% if 'package' in request.resolver_match.url_name %}btn-primary{% endif %}" style="padding: 6px 12px; font-size: 13px;">
+            📦 Gói Content
+          </a>
+          <a href="{% url 'workspaces:my_tasks' current_workspace.id %}" class="btn btn-sm {% if request.resolver_match.url_name == 'my_tasks' %}btn-primary{% endif %}" style="padding: 6px 12px; font-size: 13px;">
+            📋 Công việc
+          </a>
+          <a href="{% url 'workspaces:workspace_notifications' current_workspace.id %}" class="btn btn-sm {% if 'notification' in request.resolver_match.url_name %}btn-primary{% endif %}" style="padding: 6px 12px; font-size: 13px;">
+            🔔 Thông báo
+          </a>
+          <a href="{% url 'workspaces:members' current_workspace.id %}" class="btn btn-sm {% if 'member' in request.resolver_match.url_name %}btn-primary{% endif %}" style="padding: 6px 12px; font-size: 13px;">
+            👥 Thành viên
+          </a>
+          {% if current_membership.access_role == 'OWNER' %}
+            <a href="{% url 'workspaces:brand_profile' current_workspace.id %}" class="btn btn-sm {% if request.resolver_match.url_name == 'brand_profile' %}btn-primary{% endif %}" style="padding: 6px 12px; font-size: 13px;">
+              🏷️ Thương hiệu
+            </a>
+            <a href="{% url 'workspaces:edit' current_workspace.id %}" class="btn btn-sm {% if request.resolver_match.url_name == 'edit' %}btn-primary{% endif %}" style="padding: 6px 12px; font-size: 13px;">
+              ⚙️ Cài đặt
+            </a>
+          {% endif %}
+        </div>
+        <div style="font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px;">
+          <span>Workspace:</span>
+          <strong style="color: var(--fg);">{{ current_workspace.name }}</strong>
+        </div>
+      </div>
+    {% endif %}
+
     {% block content %}{% endblock %}
   </main>
 
   <footer class="footer">
     <div class="container">© {% now "Y" %} SaaS Boilerplate. Built with Django + HTMX.</div>
   </footer>
+{% endblock %}
 </body>
+</html>
 </html>

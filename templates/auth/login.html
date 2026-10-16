@@ -1,15 +1,133 @@
 {% extends "base.html" %}
 
-{% block title %}Đăng nhập{% endblock %}
+{% block title %}Đăng nhập — ContentOps Hub{% endblock %}
 
-{% block content %}
-<section class="card auth-card">
-  <h1>Đăng nhập</h1>
-  <form method="post" class="form-grid">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button class="btn btn-primary" type="submit">Đăng nhập</button>
-  </form>
-  <p class="muted">Chưa có tài khoản? <a href="{% url 'accounts:register' %}">Đăng ký ngay</a>.</p>
-</section>
+{% block app_shell %}
+<div class="auth-page-container">
+  <div class="auth-modal-card">
+    <!-- Cột trái: Mockup Card Minh Họa chuẩn Figma 01 Login.png -->
+    <div class="auth-illustration-col">
+      <div class="auth-mockup-wrapper">
+        <div class="auth-kicker">CONTENT &bull; PLAN &bull; PUBLISH</div>
+        <div class="auth-mockup-outer">
+          <div class="auth-mockup-window">
+            <div class="mockup-header-bar"></div>
+            <div class="mockup-line-thin"></div>
+            <div class="mockup-body-split">
+              <div class="mockup-square"></div>
+              <div class="mockup-lines-col">
+                <div class="mockup-line-long"></div>
+                <div class="mockup-line-short"></div>
+                <div class="mockup-line-short" style="width: 70%;"></div>
+              </div>
+            </div>
+          </div>
+          <div class="mockup-bottom-bar-1"></div>
+          <div class="mockup-bottom-bar-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cột phải: Form Đăng Nhập chuẩn Figma 01 Login.png -->
+    <div class="auth-form-col">
+      <div class="auth-form-card">
+        <!-- Logo ContentOps Hub -->
+        <div class="auth-brand-logo">
+          <span class="brand-text-dark">ContentOps</span>
+          <span class="brand-text-blue" style="margin-left: 20px;">Hub</span>
+        </div>
+
+        <h1 class="auth-title">Hệ thống quản lý content tập trung</h1>
+        <p class="auth-subtitle">Quản lý gói nội dung, cộng tác và xuất bản trong một nơi</p>
+
+        {% if form.non_field_errors %}
+          <div class="form-alert" style="margin-bottom: 20px;">
+            {% for error in form.non_field_errors %}
+              <div>{{ error }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <form method="post" action="{% url 'accounts:login' %}" novalidate>
+          {% csrf_token %}
+
+          <div class="auth-field-group">
+            <div class="auth-input-container">
+              <span class="auth-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+              </span>
+              <input type="text" name="username" autofocus placeholder="Email hoặc tên đăng nhập" maxlength="150" required id="id_username" value="{{ form.username.value|default_if_none:'' }}">
+            </div>
+            {% if form.username.errors %}
+              <p class="field-error" style="margin-top: 6px; font-size: 12.5px;">{{ form.username.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div class="auth-field-group">
+            <div class="auth-input-container">
+              <span class="auth-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+              </span>
+              <input type="password" name="password" autocomplete="current-password" placeholder="Mật khẩu" required id="id_password">
+              <button type="button" class="auth-password-toggle" id="togglePasswordBtn" aria-label="Hiện mật khẩu" onclick="togglePasswordVisibility()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+            </div>
+            {% if form.password.errors %}
+              <p class="field-error" style="margin-top: 6px; font-size: 12.5px;">{{ form.password.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div class="auth-options-row">
+            <label class="auth-checkbox-label">
+              <input type="checkbox" name="remember_me" checked>
+              <span>Duy trì đăng nhập</span>
+            </label>
+            <a href="{% url 'accounts:password_change' %}" class="auth-forgot-link">Quên mật khẩu?</a>
+          </div>
+
+          <button class="auth-submit-btn" type="submit">
+            <span class="auth-btn-text">Đăng nhập</span>
+            <span class="auth-btn-arrow">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"/>
+                <path d="m12 5 7 7-7 7"/>
+              </svg>
+            </span>
+          </button>
+        </form>
+
+        <hr class="auth-lang-divider">
+
+        <div class="auth-lang-options">
+          <span class="auth-lang-active">Tiếng Việt</span>
+          <span class="auth-lang-sep">|</span>
+          <span class="auth-lang-item">English</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function togglePasswordVisibility() {
+  const pwdInput = document.getElementById('id_password');
+  if (pwdInput) {
+    if (pwdInput.type === 'password') {
+      pwdInput.type = 'text';
+    } else {
+      pwdInput.type = 'password';
+    }
+  }
+}
+</script>
 {% endblock %}
