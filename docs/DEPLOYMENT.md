@@ -156,3 +156,50 @@ python manage.py check --deploy
 2. **`security.W008` (SECURE_SSL_REDIRECT)**:
    - *Nguyên nhân*: Django chưa bật tự động chuyển hướng HTTP sang HTTPS trong code.
    - *Xử lý*: Trên Render, SSL Termination và Force HTTPS được xử lý tại Reverse Proxy/Load Balancer. Cấu hình `SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` đã thiết lập sẵn. Nếu muốn Django tự chuyển hướng, cấu hình `SECURE_SSL_REDIRECT=True`.
+
+---
+
+## 7. Cấu Hình Môi Trường Staging Trên Render (Staging Specification)
+
+### 7.1. Thông Tin Dịch Vụ & Hạ Tầng
+- **Dịch vụ Web**:
+  - Tên Service: `contentops-staging`
+  - Loại dịch vụ: Render Web Service (Native Python runtime)
+  - Plan: Free
+  - Repository: `https://github.com/pe-oss/-contentops-hub`
+  - Branch: `deploy/staging`
+  - Commit baseline: `190d0cf` (kế thừa `c7ee50d` và `71b797e`)
+  - Python Version: `3.12.7` (được pin qua `.python-version` và `PYTHON_VERSION=3.12.7`)
+  - Root Directory: `/` (gốc repo chứa `manage.py` và `build.sh`)
+  - Build Command: `bash build.sh`
+  - Start Command: `python manage.py migrate --noinput && python -m gunicorn core.wsgi:application --bind 0.0.0.0:$PORT --workers 2` (hoặc `bash start.sh`)
+  - Auto-Deploy: Tắt (Manual deploy để kiểm soát phát hành)
+- **Cơ Sở Dữ Liệu Staging**:
+  - Tên Database: `contentops-staging-db`
+  - Loại dịch vụ: Render PostgreSQL
+  - Plan: Free (Lưu ý: Render Free PostgreSQL tự động hết hạn sau 30 ngày hoặc theo chính sách của Render, chỉ dùng cho mục đích staging/thử nghiệm, KHÔNG bảo đảm lưu trữ dài hạn và KHÔNG thay thế CSDL Production)
+  - Region: Khuyến nghị Singapore (`singapore`) hoặc Oregon (`oregon`) - **Bắt buộc cùng Region với Web Service**.
+  - Kết nối: Sử dụng **Internal Database URL** được truyền trực tiếp vào biến môi trường `DATABASE_URL` của Web Service. Không mở public access rộng hơn nhu cầu.
+
+### 7.2. Danh Mục Biến Môi Trường Staging Cần Thiết
+*(Tuyệt đối không lưu giá trị bí mật vào kho mã nguồn)*
+- `ENVIRONMENT`: `production` (kích hoạt chế độ kiểm soát chặt chẽ)
+- `DEBUG`: `False` (bắt buộc)
+- `PYTHON_VERSION`: `3.12.7`
+- `DATABASE_URL`: `<Internal Database URL>` (cung cấp từ `contentops-staging-db`)
+- `SECRET_KEY`: `<Secret key ngẫu nhiên >= 50 ký tự được sinh an toàn>`
+- `ALLOWED_HOSTS`: `<subdomain>.onrender.com` (tên miền thực tế do Render cấp, không chứa `https://`)
+- `CSRF_TRUSTED_ORIGINS`: `https://<subdomain>.onrender.com`
+- `BILLING_ENABLED`: `False`
+- `SESSION_COOKIE_SECURE`: `True`
+- `CSRF_COOKIE_SECURE`: `True`
+- `SECURE_SSL_REDIRECT`: `False` (Render Edge xử lý TLS Termination, Django nhận diện HTTPS qua `SECURE_PROXY_SSL_HEADER`)
+- `SECURE_HSTS_SECONDS`: `0` (giữ 0 ở giai đoạn staging ban đầu)
+
+### 7.3. Trạng Thái Các Gate Vận Hành & Hạn Chế Còn Thiếu
+- [x] **PostgreSQL Integration**: Đã kiểm chứng migrate và ORM trên PostgreSQL 16.
+- [x] **Static Assets Serving**: WhiteNoise phục vụ đầy đủ cache và nén cho app + Django admin.
+- [x] **Concurrency & OCC**: Đã kiểm chứng Row Locking và ConcurrencyConflictError 409 trên PostgreSQL.
+- [ ] **Email / SMTP Service**: Staging hiện dùng Console Backend (`EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"`). Tính năng xác minh email ngoài đời thực chưa gửi được email đến hòm thư thật. **Chưa đủ điều kiện nhận người dùng thật**.
+- [ ] **Automated Daily Backup**: Gói PostgreSQL Free trên Render không hỗ trợ snapshot tự động lâu dài; chưa đánh dấu đạt Gate backup định kỳ cho đến khi thiết lập cron job / pg_dump ngoài và kiểm chứng khôi phục thực tế.
+
