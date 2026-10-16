@@ -36,3 +36,7 @@ build/
 # Local Tools
 *.exe
 ngrok_requests.json
+
+# Backups
+backups/
+test_backups*/

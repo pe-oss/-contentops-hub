@@ -128,6 +128,10 @@ if IS_PRODUCTION:
     DATABASES = {
         "default": dj_database_url.parse(database_url, conn_max_age=600)
     }
+    if DATABASES["default"]["ENGINE"] != "django.db.backends.postgresql":
+        raise ImproperlyConfigured(
+            "PostgreSQL is required in production via DATABASE_URL."
+        )
 else:
     # Local development: fallback SQLite nếu DATABASE_URL rỗng
     DATABASES = {
@@ -146,7 +150,7 @@ else:
         if database_url and not database_url.startswith("sqlite"):
             test_db_name = "test_postgres"
         else:
-            test_db_name = ":memory:"
+            test_db_name = "test_db.sqlite3"
     DATABASES["default"]["TEST"] = {
         "NAME": test_db_name,
     }
@@ -190,6 +194,10 @@ if IS_PRODUCTION or not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0") or 0)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
+    SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", False)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -53,15 +53,28 @@ cp .env.example .env
 Truy cập ứng dụng tại: `http://127.0.0.1:8000/`
 
 ## 6. Quy trình Build & Triển khai (Deploy)
-- **Bước Build (`build.sh`):** Chỉ thực hiện cài đặt dependencies và thu thập static files:
+Chi tiết xem tại tài liệu hướng dẫn triển khai: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+- **Kiến trúc:** WSGI qua Gunicorn, Static files qua WhiteNoise (`CompressedManifestStaticFilesStorage`), Cơ sở dữ liệu PostgreSQL bắt buộc trong production qua `DATABASE_URL`.
+- **Bước Build (`build.sh`):** Cài đặt dependencies, thu thập static files và kiểm tra tính toàn vẹn hệ thống (`fail-fast` với `set -euo pipefail`):
   ```bash
-  pip install -r requirements.txt
-  python manage.py collectstatic --no-input
+  python -m pip install -r requirements.txt
+  python manage.py collectstatic --noinput
+  python manage.py check
   ```
 - **Bước Release Migration:** Quá trình migration CSDL được tách riêng khỏi bước build để tránh xung đột khi scale nhiều web worker và đảm bảo kiểm soát rollback.
   - Trên Render: Cấu hình `preDeployCommand: python manage.py migrate` trong `render.yaml`.
   - Trên Docker/Kubernetes: Chạy migration qua one-off job hoặc entrypoint script có kiểm soát trước khi scale web replicas.
   - **Lưu ý an toàn:** Không tự động chạy migration vào cơ sở dữ liệu production từ xa mà không có kế hoạch sao lưu.
+- **Bước Khởi động (Start):**
+  ```bash
+  gunicorn core.wsgi:application --bind 0.0.0.0:8000
+  ```
+- **Smoke Test & Kiểm tra bảo mật:**
+  ```bash
+  python manage.py check --deploy
+  ```
+- **Kế hoạch Rollback:** Xem chi tiết tại mục 5 của [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## 7. Trạng thái và giới hạn kiểm thử (B00.1)
 - **Đã kiểm thử đạt:**
