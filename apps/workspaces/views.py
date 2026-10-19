@@ -12,6 +12,7 @@ from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import View
 
+from django.db.models import Count, Q
 from apps.accounts.services import normalize_email
 from .forms import (
     BrandProfileForm,
@@ -20,8 +21,23 @@ from .forms import (
     WorkspaceInvitationForm,
     WorkspaceUpdateForm,
 )
-from .models import AccessRole, BrandProfile, EmploymentType, Invitation, Membership, MembershipStatus, Notification, Package
+from .models import (
+    AccessRole,
+    BrandProfile,
+    ContentItem,
+    ContentItemState,
+    EmploymentType,
+    Invitation,
+    Membership,
+    MembershipStatus,
+    Notification,
+    Package,
+    PackageStatus,
+    Task,
+    TaskStatus,
+)
 from .selectors import (
+    _get_dashboard_scope,
     get_brand_profile,
     get_invitation_by_id_for_workspace,
     get_invitation_by_token,
@@ -1758,8 +1774,21 @@ class MyTasksRedirectView(View):
 class PackageListView(View):
     def get(self, request, workspace_id):
         workspace, membership = get_workspace_for_user(request.user, workspace_id)
-        packages = get_workspace_packages(workspace)
+        all_packages = get_workspace_packages(workspace)
         is_owner = membership.access_role == AccessRole.OWNER
+
+        total_count = all_packages.count()
+        active_count = all_packages.filter(status=PackageStatus.ACTIVE).count()
+        completed_count = all_packages.filter(status=PackageStatus.COMPLETED).count()
+
+        status_filter = request.GET.get("status", "").strip()
+        search_query = request.GET.get("q", "").strip()
+
+        packages = all_packages
+        if status_filter:
+            packages = packages.filter(status=status_filter)
+        if search_query:
+            packages = packages.filter(name__icontains=search_query)
 
         return render(
             request,
@@ -1769,6 +1798,13 @@ class PackageListView(View):
                 "membership": membership,
                 "is_owner": is_owner,
                 "packages": packages,
+                "stats": {
+                    "total": total_count,
+                    "active": active_count,
+                    "completed": completed_count,
+                },
+                "status_filter": status_filter,
+                "search_query": search_query,
             },
         )
 
@@ -2190,6 +2226,196 @@ class PackageApprovePlanView(View):
 
         return redirect("workspaces:package_detail", workspace_id=workspace.id, package_id=package.id)
 
+
+
+
+@method_decorator(login_required, name="dispatch")
+class WorkspaceReviewsView(View):
+    """Màn hình Duyệt bài & Phê duyệt nội dung tập trung."""
+
+    def get(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        request.session["active_workspace_id"] = str(workspace.id)
+
+        is_owner = membership.access_role == AccessRole.OWNER
+        scoped_pkgs, scoped_items, coord_pkg_ids = _get_dashboard_scope(workspace, membership)
+        is_coord = bool(coord_pkg_ids)
+
+        status_filter = request.GET.get("filter", "all")
+
+        owner_items_qs = scoped_items.filter(
+            state=ContentItemState.OWNER_REVIEW
+        ).select_related("package", "writer_membership__user", "editor_membership__user", "publisher_membership__user")
+
+        editing_items_qs = scoped_items.filter(
+            state=ContentItemState.EDITING
+        ).select_related("package", "writer_membership__user", "editor_membership__user", "publisher_membership__user")
+
+        draft_pkgs = scoped_pkgs.filter(
+            status=PackageStatus.DRAFT
+        ).select_related("coordinator_membership__user")
+
+        blocked_q = ~Q(blocked_reason="") & Q(blocked_reason__isnull=False)
+        blocked_items_qs = scoped_items.filter(blocked_q).exclude(
+            state__in=[ContentItemState.CANCELLED, ContentItemState.PUBLISHED]
+        ).select_related("package", "writer_membership__user", "editor_membership__user", "blocked_by")
+
+        stats = {
+            "owner_review_count": owner_items_qs.count(),
+            "editing_count": editing_items_qs.count(),
+            "draft_pkgs_count": draft_pkgs.count(),
+            "blocked_count": blocked_items_qs.count(),
+        }
+
+        if status_filter == "owner":
+            items = owner_items_qs.order_by("review_deadline", "-created_at")
+        elif status_filter == "editor":
+            items = editing_items_qs.order_by("editing_deadline", "-created_at")
+        elif status_filter == "blocked":
+            items = blocked_items_qs.order_by("-blocked_at")
+        elif status_filter == "draft":
+            items = []
+        else:
+            items = scoped_items.filter(
+                state__in=[ContentItemState.OWNER_REVIEW, ContentItemState.EDITING]
+            ).select_related(
+                "package", "writer_membership__user", "editor_membership__user", "publisher_membership__user"
+            ).order_by("review_deadline", "editing_deadline", "-created_at")
+
+        return render(
+            request,
+            "workspaces/reviews.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "is_owner": is_owner,
+                "is_coordinator": is_coord,
+                "stats": stats,
+                "items": items,
+                "draft_packages": draft_pkgs,
+                "status_filter": status_filter,
+            },
+        )
+
+
+
+@method_decorator(login_required, name="dispatch")
+class WorkspaceReportsView(View):
+    """Màn hình Báo cáo & Hiệu suất Content chuyên sâu."""
+
+    def get(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        request.session["active_workspace_id"] = str(workspace.id)
+
+        is_owner = membership.access_role == AccessRole.OWNER
+        scoped_pkgs, scoped_items, coord_pkg_ids = _get_dashboard_scope(workspace, membership)
+        is_coord = bool(coord_pkg_ids)
+
+        now = timezone.now()
+        total_items = scoped_items.count()
+        published_items = scoped_items.filter(state=ContentItemState.PUBLISHED).count()
+        in_progress_items = scoped_items.filter(
+            state__in=[ContentItemState.WRITING, ContentItemState.EDITING, ContentItemState.OWNER_REVIEW, ContentItemState.READY_TO_PUBLISH]
+        ).count()
+        draft_or_todo = scoped_items.filter(state=ContentItemState.TODO).count()
+
+        overdue_q = (
+            (Q(state__in=[ContentItemState.TODO, ContentItemState.WRITING]) & Q(writing_deadline__lt=now))
+            | (Q(state=ContentItemState.EDITING) & Q(editing_deadline__lt=now))
+            | (Q(state=ContentItemState.OWNER_REVIEW) & Q(review_deadline__lt=now))
+            | (Q(state=ContentItemState.READY_TO_PUBLISH) & Q(planned_publish_at__lt=now))
+        )
+        overdue_items = scoped_items.filter(overdue_q).exclude(
+            state__in=[ContentItemState.CANCELLED, ContentItemState.PUBLISHED]
+        ).count()
+
+        ontime_rate = 100
+        if total_items > 0:
+            ontime_rate = max(0, min(100, int(((total_items - overdue_items) / total_items) * 100)))
+
+        publish_rate = 0
+        if total_items > 0:
+            publish_rate = int((published_items / total_items) * 100)
+
+        # Phân bổ bài viết theo kênh truyền thông
+        channels_raw = scoped_items.values("package__channel").annotate(count=Count("id")).order_by("-count")
+        channel_data = []
+        channel_colors = {
+            "FACEBOOK": "#1877f2",
+            "Facebook": "#1877f2",
+            "SEO / Blog": "#10b981",
+            "Blog": "#10b981",
+            "TikTok": "#111827",
+            "TIKTOK": "#111827",
+            "YouTube": "#ef4444",
+            "YOUTUBE": "#ef4444",
+            "Instagram": "#e1306c",
+            "INSTAGRAM": "#e1306c",
+            "Email Marketing": "#8b5cf6",
+            "LinkedIn": "#0077b5",
+        }
+        for ch in channels_raw:
+            ch_name = ch["package__channel"] or "Khác"
+            pct = int((ch["count"] / max(total_items, 1)) * 100)
+            channel_data.append({
+                "name": ch_name,
+                "count": ch["count"],
+                "percentage": pct,
+                "color": channel_colors.get(ch_name, "#2563eb"),
+            })
+
+        # Khối lượng và hiệu suất thành viên trong workspace
+        members = Membership.objects.filter(workspace=workspace, status=MembershipStatus.ACTIVE).select_related("user")
+        member_stats = []
+        for m in members:
+            m_tasks = Task.objects.filter(workspace=workspace, assignee_membership=m)
+            total_t = m_tasks.count()
+            done_t = m_tasks.filter(status=TaskStatus.DONE).count()
+            in_prog_t = m_tasks.filter(status=TaskStatus.IN_PROGRESS).count()
+            pct = int((done_t / max(total_t, 1)) * 100) if total_t > 0 else 0
+            member_stats.append({
+                "membership": m,
+                "user": m.user,
+                "role_display": m.get_access_role_display(),
+                "total_tasks": total_t,
+                "done_tasks": done_t,
+                "in_prog_tasks": in_prog_t,
+                "completion_rate": pct,
+            })
+
+        # Tiến độ chi tiết từng gói content
+        packages_progress = list(scoped_pkgs.annotate(
+            total_items_count=Count("items"),
+            published_items_count=Count("items", filter=Q(items__state=ContentItemState.PUBLISHED)),
+            cancelled_items_count=Count("items", filter=Q(items__state=ContentItemState.CANCELLED)),
+        ).select_related("coordinator_membership__user").order_by("-created_at")[:20])
+
+        for p in packages_progress:
+            active = max(p.total_items_count - p.cancelled_items_count, 0)
+            p.pct = int((p.published_items_count / max(active, 1)) * 100) if active > 0 else 0
+            p.active_items_count = active
+
+        return render(
+            request,
+            "workspaces/reports.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "is_owner": is_owner,
+                "is_coordinator": is_coord,
+                "total_items": total_items,
+                "published_items": published_items,
+                "in_progress_items": in_progress_items,
+                "draft_or_todo": draft_or_todo,
+                "overdue_items": overdue_items,
+                "ontime_rate": ontime_rate,
+                "publish_rate": publish_rate,
+                "channel_data": channel_data,
+                "member_stats": member_stats,
+                "packages_progress": packages_progress,
+                "active_packages_count": scoped_pkgs.filter(status=PackageStatus.ACTIVE).count(),
+            },
+        )
 
 
 

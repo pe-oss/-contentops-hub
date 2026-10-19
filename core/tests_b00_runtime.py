@@ -100,7 +100,7 @@ class BillingDisabledRoutesTests(TestCase):
 
     @override_settings(BILLING_ENABLED=False)
     def test_home_page_hides_pricing_link_when_billing_disabled(self):
-        response = self.client.get(reverse("home"))
+        response = self.client.get(reverse("home"), follow=True)
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'href="/pricing/"')
         self.assertNotContains(response, "Xem bảng giá")

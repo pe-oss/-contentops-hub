@@ -3,110 +3,82 @@
 {% block title %}{{ workspace.name }} — Tổng quan Dashboard (UI01){% endblock %}
 
 {% block content %}
-<section class="dashboard-page">
-  <div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
-    <div>
-      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
-        <p class="eyebrow" style="margin: 0;">Tổng quan Workspace (UI01)</p>
+<section class="dash-page-container">
+  <!-- DASHBOARD TOP HEADER HERO (Figma Dashboard.png) -->
+  <div class="dash-top-hero">
+    <div class="dash-heading-wrap">
+      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+        <span class="eyebrow" style="margin: 0;">Không gian làm việc</span>
         {% if is_owner %}
-          <span class="badge badge-pro" style="font-size: 11px;">Chủ workspace</span>
+          <span class="badge badge-pro" style="font-size: 11px; padding: 3px 8px; min-width: auto;">Chủ workspace</span>
         {% elif is_coordinator %}
-          <span class="badge" style="background: #fef3c7; color: #b45309; font-size: 11px;">Điều phối viên</span>
+          <span class="badge" style="background: #fef3c7; color: #b45309; font-size: 11px; padding: 3px 8px; min-width: auto;">Điều phối viên</span>
         {% else %}
-          <span class="badge" style="background: #e8f0fe; color: #1a73e8; font-size: 11px;">Thành viên</span>
+          <span class="badge" style="background: #e8f0fe; color: #1a73e8; font-size: 11px; padding: 3px 8px; min-width: auto;">Thành viên</span>
         {% endif %}
       </div>
-      <h1 style="margin: 0 0 8px 0;">{{ workspace.name }}</h1>
-      <p class="muted" style="margin: 0;">Múi giờ: <strong>{{ workspace.timezone }}</strong></p>
+      <h1>{{ workspace.name }}</h1>
+      <p>Tổng quan vận hành nội dung đa kênh &bull; Múi giờ: <strong>{{ workspace.timezone }}</strong></p>
     </div>
-    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-      <a href="{% url 'workspaces:list' %}" class="btn">← Workspaces</a>
-      <a href="{% url 'workspaces:my_tasks' workspace.id %}" class="btn">📋 Việc của tôi</a>
-      <a href="{% url 'workspaces:workspace_notifications' workspace.id %}" class="btn">🔔 Thông báo</a>
-      <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn">📦 Kế hoạch &amp; Gói bài</a>
+
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      <a href="{% url 'workspaces:list' %}" class="btn" style="font-size: 13px;">← Workspaces</a>
+      <a href="{% url 'workspaces:my_tasks' workspace.id %}" class="btn" style="font-size: 13px;">📋 Việc của tôi</a>
+      <a href="{% url 'workspaces:workspace_notifications' workspace.id %}" class="btn" style="font-size: 13px;">🔔 Thông báo</a>
+      <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn" style="font-size: 13px;">📦 Kế hoạch &amp; Gói bài</a>
       {% if is_owner %}
-        <a href="{% url 'workspaces:brand_profile' workspace.id %}" class="btn">🏷️ Thương hiệu</a>
-        <a href="{% url 'workspaces:members' workspace.id %}" class="btn">👥 Thành viên</a>
-        <a href="{% url 'workspaces:edit' workspace.id %}" class="btn btn-primary">Chỉnh sửa</a>
+        <a href="{% url 'workspaces:brand_profile' workspace.id %}" class="btn" style="font-size: 13px;">🏷️ Thương hiệu</a>
+        <a href="{% url 'workspaces:members' workspace.id %}" class="btn" style="font-size: 13px;">👥 Thành viên</a>
+        <a href="{% url 'workspaces:edit' workspace.id %}" class="btn btn-primary" style="font-size: 13px;">Chỉnh sửa</a>
       {% endif %}
     </div>
   </div>
 
-  <!-- BỘ ĐẾM CHỈ SỐ THEO PHÂN QUYỀN (Spec UI01) -->
-  <div class="dashboard-grid" style="margin-top: 24px;">
-    {% if is_owner %}
-      <article class="card stat-card">
-        <span class="muted">Gói đang chạy</span>
-        <strong>{{ stats.active_packages_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card" style="border-left: 4px solid #3b82f6;">
-        <span class="muted">Bài chờ duyệt</span>
-        <strong style="color: #2563eb;">{{ stats.pending_approval_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card" style="border-left: 4px solid #ef4444;">
-        <span class="muted">Bài bị chặn (Blocker)</span>
-        <strong style="color: #dc2626;">{{ stats.blocked_items_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card" style="border-left: 4px solid #f59e0b;">
-        <span class="muted">Bài trễ hạn</span>
-        <strong style="color: #d97706;">{{ stats.overdue_items_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card">
-        <span class="muted">Đã xuất bản</span>
-        <strong style="color: #10b981;">{{ stats.published_items_count|default:0 }}</strong>
-      </article>
-    {% elif is_coordinator %}
-      <article class="card stat-card">
-        <span class="muted">Gói phụ trách</span>
-        <strong>{{ stats.active_packages_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card" style="border-left: 4px solid #3b82f6;">
-        <span class="muted">Việc sẵn sàng làm</span>
-        <strong style="color: #2563eb;">{{ stats.my_ready_tasks_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card" style="border-left: 4px solid #ef4444;">
-        <span class="muted">Bài bị chặn</span>
-        <strong style="color: #dc2626;">{{ stats.blocked_items_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card" style="border-left: 4px solid #f59e0b;">
-        <span class="muted">Bài trễ hạn</span>
-        <strong style="color: #d97706;">{{ stats.overdue_items_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card">
-        <span class="muted">Đã xuất bản</span>
-        <strong style="color: #10b981;">{{ stats.published_items_count|default:0 }}</strong>
-      </article>
+  <!-- 3 METRIC KPI CARDS (Matching Figma Dashboard.png) -->
+  {% include "workspaces/dashboard_top_kpi.html" %}
+
+  <!-- SECONDARY BADGES ROW: BLOCKERS & OVERDUE -->
+  <div style="display: flex; gap: 12px; margin-bottom: 28px; flex-wrap: wrap;">
+    {% if is_owner or is_coordinator %}
+      <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.blocked_items_count > 0 %}#fef2f2{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.blocked_items_count > 0 %}#fca5a5{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.blocked_items_count > 0 %}#dc2626{% else %}#64748b{% endif %};">
+        <span>⚠️ Bài bị chặn:</span>
+        <strong>{{ stats.blocked_items_count|default:0 }}</strong>
+      </a>
+      <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.overdue_items_count > 0 %}#fffbeb{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.overdue_items_count > 0 %}#fcd34d{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.overdue_items_count > 0 %}#d97706{% else %}#64748b{% endif %};">
+        <span>⏰ Bài trễ hạn:</span>
+        <strong>{{ stats.overdue_items_count|default:0 }}</strong>
+      </a>
     {% else %}
-      <article class="card stat-card" style="border-left: 4px solid #3b82f6;">
-        <span class="muted">Việc sẵn sàng làm</span>
-        <strong style="color: #2563eb;">{{ stats.my_ready_tasks_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card">
-        <span class="muted">Việc đang thực hiện</span>
-        <strong>{{ stats.my_in_progress_tasks_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card" style="border-left: 4px solid #ef4444;">
-        <span class="muted">Bài bị chặn</span>
-        <strong style="color: #dc2626;">{{ stats.my_blocked_items_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card" style="border-left: 4px solid #f59e0b;">
-        <span class="muted">Việc trễ hạn</span>
-        <strong style="color: #d97706;">{{ stats.my_overdue_tasks_count|default:0 }}</strong>
-      </article>
-      <article class="card stat-card">
-        <span class="muted">Việc đã xong</span>
-        <strong style="color: #10b981;">{{ stats.my_done_tasks_count|default:0 }}</strong>
-      </article>
+      <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.my_blocked_items_count > 0 %}#fef2f2{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.my_blocked_items_count > 0 %}#fca5a5{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.my_blocked_items_count > 0 %}#dc2626{% else %}#64748b{% endif %};">
+        <span>⚠️ Bài bị chặn:</span>
+        <strong>{{ stats.my_blocked_items_count|default:0 }}</strong>
+      </a>
+      <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.my_overdue_tasks_count > 0 %}#fffbeb{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.my_overdue_tasks_count > 0 %}#fcd34d{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.my_overdue_tasks_count > 0 %}#d97706{% else %}#64748b{% endif %};">
+        <span>⏰ Việc trễ hạn:</span>
+        <strong>{{ stats.my_overdue_tasks_count|default:0 }}</strong>
+      </a>
     {% endif %}
   </div>
 
-  <!-- VÙNG 1: CẦN QUYẾT ĐỊNH -->
-  {% include "workspaces/dashboard_decision_region.html" %}
+  <!-- GRID 6 DỊCH VỤ CHÍNH (Matching Figma Dashboard.png) -->
+  {% include "workspaces/dashboard_services_grid.html" %}
 
-  <!-- VÙNG 2: BỊ CHẶN / TRỄ HẠN -->
-  {% include "workspaces/dashboard_blocked_overdue_region.html" %}
+  <!-- 2 CỘT DƯỚI: HẠN SẮP TỚI & HOẠT ĐỘNG GẦN ĐÂY (Matching Figma Dashboard.png) -->
+  {% include "workspaces/dashboard_recent_panels.html" %}
 
-  <!-- VÙNG 3: TIẾN ĐỘ GÓI -->
-  {% include "workspaces/dashboard_package_progress_region.html" %}
+  <div id="decision-region">
+    <!-- VÙNG 1: CẦN QUYẾT ĐỊNH (Spec B09) -->
+    {% include "workspaces/dashboard_decision_region.html" %}
+  </div>
+
+  <div id="blocked-overdue-region">
+    <!-- VÙNG 2: BỊ CHẶN / TRỄ HẠN (Spec B09) -->
+    {% include "workspaces/dashboard_blocked_overdue_region.html" %}
+  </div>
+
+  <div id="progress-region">
+    <!-- VÙNG 3: TIẾN ĐỘ GÓI (Spec B09) -->
+    {% include "workspaces/dashboard_package_progress_region.html" %}
+  </div>
 </section>
 {% endblock %}

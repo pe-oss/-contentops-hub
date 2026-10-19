@@ -11,11 +11,11 @@ from apps.workspaces.views import (
     NotificationReadView,
 )
 
-from .views import dashboard
+from .views import dashboard, root_redirect_view
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("", TemplateView.as_view(template_name="home.html"), name="home"),
+    path("", root_redirect_view, name="home"),
     path("pricing/", pricing_view, name="pricing"),
     path("dashboard/", dashboard, name="dashboard"),
     path("auth/", include("apps.accounts.urls")),

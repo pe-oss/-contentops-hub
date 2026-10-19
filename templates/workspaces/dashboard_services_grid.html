@@ -1,0 +1,111 @@
+<!-- GRID 6 DỊCH VỤ CHÍNH (Matching Figma Dashboard.png) -->
+<div style="margin-bottom: 36px;">
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+    <h2 style="font-size: 18px; font-weight: 800; color: #0f172a; margin: 0;">Dịch vụ chính</h2>
+    <span style="font-size: 13px; color: #64748b;">Truy cập nhanh các luồng nghiệp vụ</span>
+  </div>
+
+  <div class="dash-services-grid">
+    <!-- 1. Quản lý Gói Content -->
+    <a href="{% url 'workspaces:package_list' workspace.id %}" class="dash-service-card">
+      <div class="service-card-header">
+        <div class="service-icon-box" style="background: #eff6ff; color: #2563eb;">
+          <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        </div>
+        <div>
+          <h3 class="service-title">Gói Content</h3>
+          <p class="service-desc">Kế hoạch sản xuất bài viết theo chiến dịch định kỳ.</p>
+        </div>
+      </div>
+      <div class="service-card-action">
+        <span>Xem danh sách gói</span>
+        <span>→</span>
+      </div>
+    </a>
+
+    <!-- 2. Danh sách Công việc -->
+    <a href="{% url 'workspaces:my_tasks' workspace.id %}" class="dash-service-card">
+      <div class="service-card-header">
+        <div class="service-icon-box" style="background: #ecfdf5; color: #059669;">
+          <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+        </div>
+        <div>
+          <h3 class="service-title">Công việc</h3>
+          <p class="service-desc">Theo dõi nhiệm vụ viết, biên tập và xuất bản bài.</p>
+        </div>
+      </div>
+      <div class="service-card-action" style="color: #059669;">
+        <span>Việc của tôi</span>
+        <span>→</span>
+      </div>
+    </a>
+
+    <!-- 3. Duyệt bài & Phê duyệt -->
+    <a href="{% url 'workspaces:reviews' workspace.id %}" class="dash-service-card">
+      <div class="service-card-header">
+        <div class="service-icon-box" style="background: #fef3c7; color: #d97706;">
+          <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <div>
+          <h3 class="service-title">Duyệt bài</h3>
+          <p class="service-desc">Phê duyệt nội dung, kiểm tra yêu cầu chỉnh sửa.</p>
+        </div>
+      </div>
+      <div class="service-card-action" style="color: #d97706;">
+        <span>Cần quyết định</span>
+        <span>→</span>
+      </div>
+    </a>
+
+    <!-- 4. Lịch đăng nội dung -->
+    <a href="{% url 'workspaces:package_list' workspace.id %}?view=calendar" class="dash-service-card">
+      <div class="service-card-header">
+        <div class="service-icon-box" style="background: #f5f3ff; color: #7c3aed;">
+          <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        </div>
+        <div>
+          <h3 class="service-title">Lịch nội dung</h3>
+          <p class="service-desc">Lịch xuất bản bài viết trên các kênh phân phối.</p>
+        </div>
+      </div>
+      <div class="service-card-action" style="color: #7c3aed;">
+        <span>Xem lịch biểu</span>
+        <span>→</span>
+      </div>
+    </a>
+
+    <!-- 5. Thành viên Workspace -->
+    <a href="{% url 'workspaces:members' workspace.id %}" class="dash-service-card">
+      <div class="service-card-header">
+        <div class="service-icon-box" style="background: #e0f2fe; color: #0284c7;">
+          <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+        </div>
+        <div>
+          <h3 class="service-title">Thành viên</h3>
+          <p class="service-desc">Phân công vai trò điều phối viên, biên tập, tác giả.</p>
+        </div>
+      </div>
+      <div class="service-card-action" style="color: #0284c7;">
+        <span>Quản lý thành viên</span>
+        <span>→</span>
+      </div>
+    </a>
+
+    <!-- 6. Hồ sơ Thương hiệu -->
+    <a href="{% url 'workspaces:brand_profile' workspace.id %}" class="dash-service-card">
+      <div class="service-card-header">
+        <div class="service-icon-box" style="background: #fdf2f8; color: #db2777;">
+          <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.5 0 1 .2 1.4.6l7 7a2 2 0 010 2.8l-7 7a2 2 0 01-2.8 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
+        </div>
+        <div>
+          <h3 class="service-title">Thương hiệu</h3>
+          <p class="service-desc">Giọng văn, quy chuẩn thương hiệu và hướng dẫn nội dung.</p>
+        </div>
+      </div>
+      <div class="service-card-action" style="color: #db2777;">
+        <span>Xem Brand Profile</span>
+        <span>→</span>
+      </div>
+    </a>
+  </div>
+</div>

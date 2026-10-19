@@ -1,0 +1,84 @@
+<!-- 2 CỘT DƯỚI: HẠN SẮP TỚI & HOẠT ĐỘNG GẦN ĐÂY (Matching Figma Dashboard.png) -->
+<div class="dash-bottom-grid">
+  <!-- Cột trái: Hạn sắp tới -->
+  <div class="dash-panel-card">
+    <div class="dash-panel-header">
+      <h3 class="dash-panel-title">
+        <span>⏰</span>
+        <span>Hạn sắp tới</span>
+      </h3>
+      <a href="{% url 'workspaces:my_tasks' workspace.id %}" style="font-size: 13px; font-weight: 600; color: #2563eb; text-decoration: none;">Xem tất cả →</a>
+    </div>
+
+    <div class="dash-list-group">
+      {% if my_ready_tasks %}
+        {% for t in my_ready_tasks|slice:":5" %}
+          <a href="{% url 'workspaces:item_detail' workspace.id t.item.package_id t.item.id %}" class="dash-list-item">
+            <div>
+              <div class="dash-list-item-title">{{ t.item.title }}</div>
+              <div class="dash-list-item-subtitle">{{ t.get_role_display }} &bull; Gói: {{ t.item.package.name }}</div>
+            </div>
+            <span class="badge" style="font-size: 11px; padding: 4px 8px; min-width: auto; background: #eff6ff; color: #2563eb;">{{ t.due_at|date:"d/m H:i" }}</span>
+          </a>
+        {% endfor %}
+      {% elif overdue_items %}
+        {% for it in overdue_items|slice:":5" %}
+          <a href="{% url 'workspaces:item_detail' workspace.id it.package_id it.id %}" class="dash-list-item">
+            <div>
+              <div class="dash-list-item-title">{{ it.title }}</div>
+              <div class="dash-list-item-subtitle">{{ it.get_state_display }} &bull; Gói: {{ it.package.name }}</div>
+            </div>
+            <span class="badge" style="font-size: 11px; padding: 4px 8px; min-width: auto; background: #fef2f2; color: #dc2626;">Trễ hạn</span>
+          </a>
+        {% endfor %}
+      {% else %}
+        <div style="text-align: center; padding: 24px; color: #94a3b8; font-size: 13.5px;">
+          ✓ Không có nhiệm vụ nào cận hạn trong thời gian tới.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Cột phải: Hoạt động gần đây & Cần phê duyệt -->
+  <div class="dash-panel-card">
+    <div class="dash-panel-header">
+      <h3 class="dash-panel-title">
+        <span>🎯</span>
+        <span>Cần quyết định &amp; Chờ duyệt</span>
+      </h3>
+      <a href="{% url 'workspaces:reviews' workspace.id %}" style="font-size: 13px; font-weight: 600; color: #2563eb; text-decoration: none;">Chi tiết →</a>
+    </div>
+
+    <div class="dash-list-group">
+      {% if is_owner and draft_packages %}
+        {% for pkg in draft_packages|slice:":3" %}
+          <a href="{% url 'workspaces:package_detail' workspace.id pkg.id %}" class="dash-list-item" style="border-left: 4px solid #f59e0b;">
+            <div>
+              <div class="dash-list-item-title">{{ pkg.name }}</div>
+              <div class="dash-list-item-subtitle">Gói kế hoạch mới &bull; Điều phối: {{ pkg.coordinator_membership.user.username }}</div>
+            </div>
+            <span class="badge" style="font-size: 11px; padding: 4px 8px; min-width: auto; background: #fffbeb; color: #b45309;">Chờ duyệt</span>
+          </a>
+        {% endfor %}
+      {% endif %}
+
+      {% if items_need_decision %}
+        {% for it in items_need_decision|slice:":4" %}
+          <a href="{% url 'workspaces:item_detail' workspace.id it.package_id it.id %}" class="dash-list-item" style="border-left: 4px solid #2563eb;">
+            <div>
+              <div class="dash-list-item-title">{{ it.title }}</div>
+              <div class="dash-list-item-subtitle">Bài viết chờ Chủ duyệt &bull; Gói: {{ it.package.name }}</div>
+            </div>
+            <span class="badge" style="font-size: 11px; padding: 4px 8px; min-width: auto; background: #eff6ff; color: #2563eb;">Duyệt bài</span>
+          </a>
+        {% endfor %}
+      {% endif %}
+
+      {% if not draft_packages and not items_need_decision %}
+        <div style="text-align: center; padding: 24px; color: #94a3b8; font-size: 13.5px;">
+          ✓ Mọi nội dung và kế hoạch hiện tại đã được phê duyệt đầy đủ.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>

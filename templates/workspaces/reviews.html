@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Duyệt bài & Phê duyệt nội dung — {{ workspace.name }}{% endblock %}
+
+{% block content %}
+<div class="dash-page-container">
+  <!-- Top Header Hero -->
+  <div class="dash-top-hero">
+    <div class="dash-heading-wrap">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+        <span class="eyebrow" style="margin: 0; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; font-weight: 700; color: #2563eb;">Kiểm soát chất lượng</span>
+        <span class="badge" style="background: #e8f0fe; color: #1a73e8; font-size: 11px; padding: 2px 8px; border-radius: 9999px;">{{ workspace.name }}</span>
+      </div>
+      <h1>Duyệt bài &amp; Phê duyệt nội dung</h1>
+      <p>Trung tâm kiểm soát chất lượng: xét duyệt bản thảo, yêu cầu chỉnh sửa và phê duyệt kế hoạch xuất bản</p>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <a href="{% url 'workspaces:detail' workspace.id %}" class="btn" style="font-size: 13.5px; padding: 8px 14px;">← Tổng quan</a>
+      <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn" style="font-size: 13.5px; padding: 8px 14px;">📦 Gói content</a>
+    </div>
+  </div>
+
+  <!-- 4 KPI Cards -->
+  <div class="kpi-row" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 24px;">
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #fef3c7; color: #d97706;">
+        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #d97706;">{{ stats.owner_review_count|default:0 }}</div>
+        <div class="kpi-lbl">Chờ Chủ duyệt</div>
+      </div>
+    </div>
+
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #eff6ff; color: #2563eb;">
+        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v12a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #2563eb;">{{ stats.editing_count|default:0 }}</div>
+        <div class="kpi-lbl">Biên tập duyệt</div>
+      </div>
+    </div>
+
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #f5f3ff; color: #7c3aed;">
+        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+        </svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #7c3aed;">{{ stats.draft_pkgs_count|default:0 }}</div>
+        <div class="kpi-lbl">Kế hoạch chờ duyệt</div>
+      </div>
+    </div>
+
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #fef2f2; color: #dc2626;">
+        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #dc2626;">{{ stats.blocked_count|default:0 }}</div>
+        <div class="kpi-lbl">Đang bị chặn</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filter Navigation Tabs -->
+  <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 12px;">
+    <a href="{% url 'workspaces:reviews' workspace.id %}?filter=all" class="btn {% if status_filter == 'all' or not status_filter %}btn-primary{% endif %}" style="font-size: 13px; padding: 6px 14px; border-radius: 9999px;">
+      Tất cả
+    </a>
+    <a href="{% url 'workspaces:reviews' workspace.id %}?filter=owner" class="btn {% if status_filter == 'owner' %}btn-primary{% endif %}" style="font-size: 13px; padding: 6px 14px; border-radius: 9999px;">
+      👑 Chủ duyệt ({{ stats.owner_review_count|default:0 }})
+    </a>
+    <a href="{% url 'workspaces:reviews' workspace.id %}?filter=editor" class="btn {% if status_filter == 'editor' %}btn-primary{% endif %}" style="font-size: 13px; padding: 6px 14px; border-radius: 9999px;">
+      ✍️ Biên tập ({{ stats.editing_count|default:0 }})
+    </a>
+    {% if draft_packages %}
+    <a href="{% url 'workspaces:reviews' workspace.id %}?filter=draft" class="btn {% if status_filter == 'draft' %}btn-primary{% endif %}" style="font-size: 13px; padding: 6px 14px; border-radius: 9999px;">
+      📦 Kế hoạch gói ({{ stats.draft_pkgs_count|default:0 }})
+    </a>
+    {% endif %}
+    {% if stats.blocked_count > 0 %}
+    <a href="{% url 'workspaces:reviews' workspace.id %}?filter=blocked" class="btn {% if status_filter == 'blocked' %}btn-primary{% endif %}" style="font-size: 13px; padding: 6px 14px; border-radius: 9999px; color: #dc2626; border-color: #fca5a5;">
+      ⚠️ Bị chặn ({{ stats.blocked_count }})
+    </a>
+    {% endif %}
+  </div>
+
+  <!-- Kế hoạch gói chờ duyệt (nếu có và lọc phù hợp) -->
+  {% if draft_packages and status_filter != 'owner' and status_filter != 'editor' and status_filter != 'blocked' %}
+  <div style="margin-bottom: 28px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <h3 style="font-size: 15px; font-weight: 700; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 8px;">
+        <span>📦</span>
+        <span>Kế hoạch Gói nội dung chờ Owner phê duyệt</span>
+      </h3>
+      <span class="badge" style="background: #f5f3ff; color: #7c3aed; font-size: 12px; font-weight: 700;">{{ draft_packages|length }} gói</span>
+    </div>
+    <div class="table-modern-card">
+      <table class="table-modern">
+        <thead>
+          <tr>
+            <th>Tên gói</th>
+            <th>Điều phối viên</th>
+            <th>Thời gian thực hiện</th>
+            <th>Trạng thái</th>
+            <th style="text-align: right;">Hành động</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pkg in draft_packages %}
+          <tr>
+            <td>
+              <div style="font-weight: 700; color: #0f172a;">{{ pkg.name }}</div>
+              {% if pkg.objective %}
+                <div style="font-size: 12px; color: #64748b; margin-top: 2px;">{{ pkg.objective|truncatechars:70 }}</div>
+              {% endif %}
+            </td>
+            <td>
+              <span style="font-size: 13px; color: #334155; font-weight: 500;">{{ pkg.coordinator_membership.user.username }}</span>
+            </td>
+            <td>
+              <span style="font-size: 13px; color: #64748b;">
+                {% if pkg.start_date %}{{ pkg.start_date|date:"d/m/Y" }}{% else %}—{% endif %} → {% if pkg.end_date %}{{ pkg.end_date|date:"d/m/Y" }}{% else %}—{% endif %}
+              </span>
+            </td>
+            <td>
+              <span class="badge" style="background: #fffbeb; color: #b45309; font-weight: 600;">Kế hoạch nháp</span>
+            </td>
+            <td style="text-align: right;">
+              <a href="{% url 'workspaces:package_detail' workspace.id pkg.id %}" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">
+                Xem &amp; Duyệt kế hoạch →
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  <!-- Danh sách bài viết cần duyệt -->
+  <div>
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <h3 style="font-size: 15px; font-weight: 700; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 8px;">
+        <span>📝</span>
+        <span>Danh sách bài viết cần kiểm duyệt</span>
+      </h3>
+      {% if items %}
+        <span class="badge" style="background: #eff6ff; color: #2563eb; font-size: 12px; font-weight: 700;">{{ items|length }} bài viết</span>
+      {% endif %}
+    </div>
+
+    {% if items %}
+      <div class="table-modern-card">
+        <table class="table-modern">
+          <thead>
+            <tr>
+              <th>Tiêu đề bài viết</th>
+              <th>Gói nội dung</th>
+              <th>Kênh</th>
+              <th>Phụ trách</th>
+              <th>Hạn duyệt</th>
+              <th>Trạng thái</th>
+              <th style="text-align: right;">Hành động</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td>
+                <div style="max-width: 230px; font-weight: 700; color: #0f172a; font-size: 13.5px; line-height: 1.4; white-space: normal;">
+                  <a href="{% url 'workspaces:item_detail' workspace.id item.package_id item.id %}" style="text-decoration: none; color: inherit;">
+                    {{ item.title }}
+                  </a>
+                </div>
+                {% if item.blocked_reason %}
+                  <div style="font-size: 11px; color: #dc2626; margin-top: 3px; display: inline-flex; align-items: center; gap: 4px;">
+                    <span>⚠️ Bị chặn: {{ item.blocked_reason|truncatechars:35 }}</span>
+                  </div>
+                {% endif %}
+              </td>
+              <td>
+                <div style="max-width: 150px; font-size: 12.5px; line-height: 1.35; white-space: normal;">
+                  <a href="{% url 'workspaces:package_detail' workspace.id item.package_id %}" style="text-decoration: none; color: #2563eb; font-weight: 500;">
+                    {{ item.package.name }}
+                  </a>
+                </div>
+              </td>
+              <td>
+                <span class="badge-channel-fb">
+                  <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                  <span>{{ item.package.channel }}</span>
+                </span>
+              </td>
+              <td style="font-size: 12px; line-height: 1.4; white-space: nowrap;">
+                {% if item.writer_membership %}
+                  <div><span style="color: #64748b;">Viết:</span> <strong>{{ item.writer_membership.user.username }}</strong></div>
+                {% endif %}
+                {% if item.editor_membership %}
+                  <div><span style="color: #64748b;">Duyệt:</span> <strong>{{ item.editor_membership.user.username }}</strong></div>
+                {% endif %}
+              </td>
+              <td style="font-size: 12px; color: #475569; font-weight: 600; white-space: nowrap;">
+                {% if item.state == 'OWNER_REVIEW' and item.review_deadline %}
+                  {{ item.review_deadline|date:"H:i d/m" }}
+                {% elif item.state == 'EDITING' and item.editing_deadline %}
+                  {{ item.editing_deadline|date:"H:i d/m" }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td style="white-space: nowrap;">
+                {% if item.state == 'OWNER_REVIEW' %}
+                  <span class="badge" style="background: #fef3c7; color: #b45309; font-weight: 700; font-size: 10.5px; padding: 3px 6px;">👑 Chờ Chủ duyệt</span>
+                {% elif item.state == 'EDITING' %}
+                  <span class="badge" style="background: #eff6ff; color: #1d4ed8; font-weight: 700; font-size: 10.5px; padding: 3px 6px;">✍️ Đang biên tập</span>
+                {% else %}
+                  <span class="badge" style="font-size: 10.5px; padding: 3px 6px;">{{ item.get_state_display }}</span>
+                {% endif %}
+              </td>
+              <td style="text-align: right; white-space: nowrap;">
+                <a href="{% url 'workspaces:item_detail' workspace.id item.package_id item.id %}" class="btn btn-primary" style="font-size: 12px; padding: 5px 10px; font-weight: 600;">
+                  Duyệt bài →
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif not draft_packages or status_filter == 'owner' or status_filter == 'editor' or status_filter == 'blocked' %}
+      <div class="card-modern" style="text-align: center; padding: 48px 24px; background: #ffffff; border-radius: 12px; border: 1px dashed var(--border);">
+        <div style="font-size: 36px; margin-bottom: 12px;">✨</div>
+        <h3 style="font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 6px;">Không có bài viết nào đang chờ duyệt</h3>
+        <p style="font-size: 13px; color: #64748b; margin: 0 auto; max-width: 420px;">
+          Đội ngũ đang tiến hành sản xuất theo kế hoạch. Khi bài viết hoàn thành bản thảo hoặc biên tập xong, bạn sẽ thấy thông báo duyệt tại đây.
+        </p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+

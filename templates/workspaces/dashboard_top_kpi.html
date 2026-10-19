@@ -1,0 +1,103 @@
+<!-- 3 METRIC KPI CARDS (Matching Figma Dashboard.png top row) -->
+<div class="kpi-row" style="margin-top: 20px;">
+  {% if is_owner %}
+    <!-- Card 1: Gói đang chạy -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #eff6ff; color: #2563eb;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val">{{ stats.active_packages_count|default:0 }}</div>
+        <div class="kpi-lbl">Gói đang chạy</div>
+      </div>
+    </div>
+
+    <!-- Card 2: Bài chờ duyệt -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #fef3c7; color: #d97706;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #2563eb;">{{ stats.pending_approval_count|default:0 }}</div>
+        <div class="kpi-lbl">Bài chờ duyệt</div>
+      </div>
+    </div>
+
+    <!-- Card 3: Đã xuất bản -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #ecfdf5; color: #10b981;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #10b981;">{{ stats.published_items_count|default:0 }}</div>
+        <div class="kpi-lbl">Đã xuất bản</div>
+      </div>
+    </div>
+  {% elif is_coordinator %}
+    <!-- Card 1: Gói phụ trách -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #eff6ff; color: #2563eb;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val">{{ stats.active_packages_count|default:0 }}</div>
+        <div class="kpi-lbl">Gói phụ trách</div>
+      </div>
+    </div>
+
+    <!-- Card 2: Việc sẵn sàng làm -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #eff6ff; color: #2563eb;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #2563eb;">{{ stats.my_ready_tasks_count|default:0 }}</div>
+        <div class="kpi-lbl">Việc sẵn sàng làm</div>
+      </div>
+    </div>
+
+    <!-- Card 3: Đã xuất bản -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #ecfdf5; color: #10b981;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #10b981;">{{ stats.published_items_count|default:0 }}</div>
+        <div class="kpi-lbl">Đã xuất bản</div>
+      </div>
+    </div>
+  {% else %}
+    <!-- Card 1: Việc sẵn sàng làm -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #eff6ff; color: #2563eb;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #2563eb;">{{ stats.my_ready_tasks_count|default:0 }}</div>
+        <div class="kpi-lbl">Việc sẵn sàng làm</div>
+      </div>
+    </div>
+
+    <!-- Card 2: Việc đang thực hiện -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #fef3c7; color: #d97706;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val">{{ stats.my_in_progress_tasks_count|default:0 }}</div>
+        <div class="kpi-lbl">Việc đang thực hiện</div>
+      </div>
+    </div>
+
+    <!-- Card 3: Việc đã xong -->
+    <div class="kpi-card-modern">
+      <div class="kpi-icon-box" style="background: #ecfdf5; color: #10b981;">
+        <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <div>
+        <div class="kpi-val" style="color: #10b981;">{{ stats.my_done_tasks_count|default:0 }}</div>
+        <div class="kpi-lbl">Việc đã xong</div>
+      </div>
+    </div>
+  {% endif %}
+</div>

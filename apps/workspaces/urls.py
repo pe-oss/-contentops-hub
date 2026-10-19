@@ -42,6 +42,8 @@ from .views import (
     WorkspaceInviteView,
     WorkspaceListView,
     WorkspaceMembersView,
+    WorkspaceReportsView,
+    WorkspaceReviewsView,
     WorkspaceSwitchView,
     WorkspaceUpdateView,
 )
@@ -53,6 +55,8 @@ urlpatterns = [
     path("new/", WorkspaceCreateView.as_view(), name="create"),
     path("<uuid:workspace_id>/", WorkspaceDetailView.as_view(), name="detail"),
     path("<uuid:workspace_id>/dashboard/", WorkspaceDetailView.as_view(), name="dashboard"),
+    path("<uuid:workspace_id>/reviews/", WorkspaceReviewsView.as_view(), name="reviews"),
+    path("<uuid:workspace_id>/reports/", WorkspaceReportsView.as_view(), name="reports"),
     path("<uuid:workspace_id>/edit/", WorkspaceUpdateView.as_view(), name="edit"),
     path("<uuid:workspace_id>/switch/", WorkspaceSwitchView.as_view(), name="switch"),
     path("<uuid:workspace_id>/brand/", BrandProfileView.as_view(), name="brand_profile"),

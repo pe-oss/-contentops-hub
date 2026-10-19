@@ -1,8 +1,15 @@
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 
 from apps.payments.models import PaymentHistory
+
+
+def root_redirect_view(request):
+    """Chuyển hướng trang gốc: người dùng chưa đăng nhập chuyển sang trang Login, đã đăng nhập chuyển sang Workspace."""
+    if request.user.is_authenticated:
+        return redirect("workspaces:list")
+    return redirect("accounts:login")
 
 
 @login_required

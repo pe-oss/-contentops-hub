@@ -613,4 +613,22 @@ class B09DashboardTasksNotificationsTestCase(TestCase):
         self.assertContains(resp, "🔔")
         self.assertContains(resp, 'badge" style="background: #dc2626')
 
+    def test_workspace_reviews_view_and_reports_view(self):
+        """Kiểm tra màn hình Duyệt bài (reviews) và Báo cáo (reports) trả về HTTP 200 với đầy đủ số liệu."""
+        self.client.force_login(self.owner)
+        # 1. Duyệt bài
+        reviews_url = reverse("workspaces:reviews", kwargs={"workspace_id": self.workspace.id})
+        resp_rev = self.client.get(reviews_url)
+        self.assertEqual(resp_rev.status_code, 200)
+        self.assertContains(resp_rev, "Duyệt bài &amp; Phê duyệt nội dung")
+        self.assertContains(resp_rev, "Chờ Chủ duyệt")
+
+        # 2. Báo cáo
+        reports_url = reverse("workspaces:reports", kwargs={"workspace_id": self.workspace.id})
+        resp_rep = self.client.get(reports_url)
+        self.assertEqual(resp_rep.status_code, 200)
+        self.assertContains(resp_rep, "Báo cáo &amp; Hiệu suất Content")
+        self.assertContains(resp_rep, "Phân bổ nội dung theo Kênh")
+
+
 

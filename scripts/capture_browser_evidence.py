@@ -92,6 +92,9 @@ def seed_data():
             "planned_publish_at": now + timedelta(days=4),
         }
     )
+    if item_review.state != "OWNER_REVIEW":
+        item_review.state = "OWNER_REVIEW"
+        item_review.save()
     v1, _ = ContentVersion.objects.get_or_create(
         workspace=ws,
         item=item_review,
@@ -167,6 +170,9 @@ def main():
         ("mobile_390px_notifications.png", f"{login_prefix}/notifications/", 390, 844),
         ("desktop_1280px_owner_review.png", f"{login_prefix}/workspaces/{ws.id}/packages/{pkg.id}/items/{item.id}/", 1280, 800),
         ("desktop_1280px_dashboard_ui01.png", f"{login_prefix}/workspaces/{ws.id}/", 1280, 800),
+        ("desktop_1280px_package_list.png", f"{login_prefix}/workspaces/{ws.id}/packages/", 1280, 800),
+        ("desktop_1280px_reviews.png", f"{login_prefix}/workspaces/{ws.id}/reviews/", 1280, 800),
+        ("desktop_1280px_reports.png", f"{login_prefix}/workspaces/{ws.id}/reports/", 1280, 800),
         ("mobile_390px_error_403.png", f"{base}/test-trigger-error/403/", 390, 844),
         ("mobile_390px_error_404.png", f"{base}/test-trigger-error/404/", 390, 844),
         ("mobile_390px_error_409.png", f"{base}/test-trigger-error/409/", 390, 844),
