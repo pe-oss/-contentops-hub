@@ -35,6 +35,18 @@
     </div>
   </div>
 
+  {% if is_owner %}
+    <!-- SETTINGS SUB-NAV TABS (OWNER) -->
+    <div style="display: flex; gap: 8px; border-bottom: 2px solid var(--border); margin-bottom: 24px;">
+      <a href="{% url 'workspaces:edit' workspace.id %}" style="padding: 10px 16px; text-decoration: none; font-weight: 600; font-size: 14px; color: #64748b;">
+        Thông tin workspace
+      </a>
+      <a href="{% url 'workspaces:brand_profile' workspace.id %}" style="padding: 10px 16px; text-decoration: none; font-weight: 700; font-size: 14px; border-bottom: 2px solid #2563eb; margin-bottom: -2px; color: #2563eb;">
+        Hồ sơ thương hiệu
+      </a>
+    </div>
+  {% endif %}
+
   <!-- Banner cảnh báo tính bất biến của Snapshot theo Spec UI02 & AC15 -->
   <div class="card" style="margin-bottom: 24px; background: #fdfbf7; border-left: 4px solid #f59e0b; padding: 16px 20px;">
     <div style="display: flex; align-items: flex-start; gap: 12px;">

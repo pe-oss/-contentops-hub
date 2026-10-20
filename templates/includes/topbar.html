@@ -23,7 +23,7 @@
   <!-- Topbar Actions (Figma Dashboard.png) -->
   <div class="topbar-actions">
     <!-- Calendar shortcut -->
-    <a href="{% if current_workspace %}{% url 'workspaces:package_list' current_workspace.id %}{% else %}#{% endif %}" class="topbar-icon-btn" title="Lịch nội dung">
+    <a href="{% if current_workspace %}{% url 'workspaces:calendar' current_workspace.id %}{% else %}#{% endif %}" class="topbar-icon-btn" title="Lịch nội dung">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
         <line x1="16" x2="16" y1="2" y2="6"></line>

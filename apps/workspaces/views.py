@@ -1,4 +1,8 @@
+import calendar as py_calendar
+from collections import defaultdict
+import datetime
 import uuid
+import zoneinfo
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -2414,6 +2418,90 @@ class WorkspaceReportsView(View):
                 "member_stats": member_stats,
                 "packages_progress": packages_progress,
                 "active_packages_count": scoped_pkgs.filter(status=PackageStatus.ACTIVE).count(),
+            },
+        )
+
+
+
+@method_decorator(login_required, name="dispatch")
+class WorkspaceCalendarView(View):
+    """Màn hình Lịch nội dung theo tháng (Figma & UX navigation)."""
+
+    def get(self, request, workspace_id):
+        workspace, membership = get_workspace_for_user(request.user, workspace_id)
+        request.session["active_workspace_id"] = str(workspace.id)
+
+        is_owner = membership.access_role == AccessRole.OWNER
+        scoped_pkgs, scoped_items, coord_pkg_ids = _get_dashboard_scope(workspace, membership)
+
+        try:
+            ws_tz = zoneinfo.ZoneInfo(workspace.timezone)
+        except Exception:
+            ws_tz = zoneinfo.ZoneInfo("Asia/Ho_Chi_Minh")
+
+        now_ws = timezone.now().astimezone(ws_tz)
+        try:
+            year = int(request.GET.get("year", now_ws.year))
+            month = int(request.GET.get("month", now_ws.month))
+            if month < 1 or month > 12:
+                year, month = now_ws.year, now_ws.month
+        except (ValueError, TypeError):
+            year, month = now_ws.year, now_ws.month
+
+        if month == 1:
+            prev_year, prev_month = year - 1, 12
+        else:
+            prev_year, prev_month = year, month - 1
+
+        if month == 12:
+            next_year, next_month = year + 1, 1
+        else:
+            next_year, next_month = year, month + 1
+
+        _, num_days = py_calendar.monthrange(year, month)
+        start_dt = datetime.datetime(year, month, 1, 0, 0, 0, tzinfo=ws_tz)
+        end_dt = datetime.datetime(year, month, num_days, 23, 59, 59, 999999, tzinfo=ws_tz)
+
+        items_qs = scoped_items.filter(
+            planned_publish_at__range=(start_dt, end_dt)
+        ).select_related("package", "writer_membership__user").order_by("planned_publish_at")
+
+        items_by_day = defaultdict(list)
+        for item in items_qs:
+            item_local_dt = item.planned_publish_at.astimezone(ws_tz)
+            item.local_time_str = item_local_dt.strftime("%H:%M")
+            items_by_day[item_local_dt.day].append(item)
+
+        cal = py_calendar.Calendar(firstweekday=0)
+        weeks_days = cal.monthdayscalendar(year, month)
+        weeks = []
+        for w in weeks_days:
+            week_cells = []
+            for d in w:
+                is_today = (year == now_ws.year and month == now_ws.month and d == now_ws.day)
+                week_cells.append({
+                    "day": d,
+                    "is_today": is_today,
+                    "items": items_by_day.get(d, []),
+                })
+            weeks.append(week_cells)
+
+        return render(
+            request,
+            "workspaces/calendar.html",
+            {
+                "workspace": workspace,
+                "membership": membership,
+                "is_owner": is_owner,
+                "year": year,
+                "month": month,
+                "prev_year": prev_year,
+                "prev_month": prev_month,
+                "next_year": next_year,
+                "next_month": next_month,
+                "weeks": weeks,
+                "total_items": items_qs.count(),
+                "now_ws": now_ws,
             },
         )
 

@@ -6,9 +6,19 @@
 <section style="max-width: 600px; margin: 40px auto;">
   <div class="card">
     <div style="margin-bottom: 24px;">
-      <p class="eyebrow">Cài đặt Workspace</p>
-      <h1 style="font-size: 1.75rem; margin-top: 4px;">Chỉnh sửa thông tin Workspace</h1>
-      <p class="muted">Chỉ Chủ sở hữu workspace mới có thẩm quyền điều chỉnh các thông tin cốt lõi này.</p>
+      <p class="eyebrow"><a href="{% url 'workspaces:detail' workspace.id %}" style="text-decoration: none; color: inherit;">← {{ workspace.name }}</a></p>
+      <h1 style="font-size: 1.75rem; margin-top: 4px;">Cài đặt Workspace</h1>
+      <p class="muted">Quản trị các thiết lập thông tin cốt lõi và hồ sơ định danh thương hiệu.</p>
+    </div>
+
+    <!-- SETTINGS SUB-NAV TABS -->
+    <div style="display: flex; gap: 8px; border-bottom: 2px solid var(--border); margin-bottom: 24px;">
+      <a href="{% url 'workspaces:edit' workspace.id %}" style="padding: 10px 16px; text-decoration: none; font-weight: 700; font-size: 14px; border-bottom: 2px solid #2563eb; margin-bottom: -2px; color: #2563eb;">
+        Thông tin workspace
+      </a>
+      <a href="{% url 'workspaces:brand_profile' workspace.id %}" style="padding: 10px 16px; text-decoration: none; font-weight: 600; font-size: 14px; color: #64748b;">
+        Hồ sơ thương hiệu
+      </a>
     </div>
 
     {% if form.non_field_errors %}
