@@ -85,17 +85,6 @@
       </a>
     {% endif %}
 
-    <!-- 7. Thông báo -->
-    <a href="{% if current_workspace %}{% url 'workspaces:workspace_notifications' current_workspace.id %}{% else %}{% url 'notifications' %}{% endif %}" class="sidebar-link {% if 'notification' in request.resolver_match.url_name %}active{% endif %}">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
-        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
-      </svg>
-      <span>Thông báo</span>
-      {% if unread_notifications_count > 0 %}
-        <span class="icon-badge" style="position: static; margin-left: auto;">{{ unread_notifications_count }}</span>
-      {% endif %}
-    </a>
 
     <!-- 8. Báo cáo -->
     {% if current_workspace %}

@@ -26,3 +26,14 @@ PASSWORD_HASHERS = [
 # Test mode flag for URL routing utilities (Spec B10)
 TEST_MODE = True
 
+# In tests, avoid requiring pre-collected Whitenoise manifest
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+

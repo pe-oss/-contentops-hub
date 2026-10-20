@@ -32,16 +32,43 @@
       </svg>
     </a>
 
-    <!-- Notification Bell with count (Figma & Test-safe) -->
-    <a href="{% if current_workspace %}{% url 'workspaces:workspace_notifications' current_workspace.id %}{% else %}{% url 'notifications' %}{% endif %}" class="topbar-icon-btn" title="🔔 Thông báo trong ứng dụng" aria-label="🔔 Thông báo" style="position: relative;">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
-        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
-      </svg>
-      {% if unread_notifications_count > 0 %}
-        <span class="badge" style="background: #dc2626; color: white; border-radius: 9999px; font-size: 11px; padding: 2px 6px; font-weight: 700; position: absolute; top: -6px; right: -6px; min-width: 18px; text-align: center;">{{ unread_notifications_count }}</span>
-      {% endif %}
-    </a>
+    <!-- Notification Bell with Popover Dropdown (UX Group 3) -->
+    <div class="notification-dropdown-wrapper" id="notificationDropdownWrapper"
+         data-endpoint="{% if current_workspace %}{% url 'workspaces:workspace_notifications' current_workspace.id %}{% else %}{% url 'workspaces:notification_list' %}{% endif %}"
+         data-read-all-endpoint="{% url 'workspaces:notification_read_all' %}"
+         data-csrf="{{ csrf_token }}">
+      <button type="button" class="topbar-icon-btn notification-bell-trigger" id="notificationDropdownBtn"
+              aria-expanded="false" aria-haspopup="true" aria-label="🔔 Thông báo" title="🔔 Thông báo trong ứng dụng" style="position: relative;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
+          <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
+        </svg>
+        <span id="topbarNotificationBadge" class="badge" style="background: #dc2626; color: white; border-radius: 9999px; font-size: 11px; padding: 2px 6px; font-weight: 700; position: absolute; top: -6px; right: -6px; min-width: 18px; text-align: center; {% if unread_notifications_count == 0 %}display: none;{% endif %}">{{ unread_notifications_count }}</span>
+      </button>
+
+      <!-- Dropdown Popover Panel -->
+      <div class="notification-dropdown-panel" id="notificationDropdownPanel" role="region" aria-label="Hộp thông báo" style="display: none;">
+        <div class="notif-panel-header">
+          <h3 class="notif-panel-title">Thông báo</h3>
+          <button type="button" class="notif-mark-all-btn" id="notifMarkAllBtn">Đánh dấu tất cả đã đọc</button>
+        </div>
+
+        <div class="notif-panel-tabs" role="tablist">
+          <button type="button" class="notif-tab-btn active" id="notifTabAll" role="tab" aria-selected="true" data-tab="all">Tất cả</button>
+          <button type="button" class="notif-tab-btn" id="notifTabUnread" role="tab" aria-selected="false" data-tab="unread">Chưa đọc</button>
+        </div>
+
+        <div class="notif-list-container" id="notifListContainer" tabindex="0" role="feed" aria-label="Danh sách thông báo">
+          <div class="notif-state-message" id="notifStateMessage" style="display: none;"></div>
+          <div id="notifItemsList"></div>
+        </div>
+
+        <div class="notif-panel-footer" id="notifPanelFooter" style="display: none;">
+          <button type="button" class="notif-load-more-btn" id="notifLoadMoreBtn">Tải thêm</button>
+          <a href="{% if current_workspace %}{% url 'workspaces:workspace_notifications' current_workspace.id %}{% else %}{% url 'notifications' %}{% endif %}" class="notif-view-all-link">Xem tất cả</a>
+        </div>
+      </div>
+    </div>
 
     <!-- Support / Chat -->
     <button type="button" class="topbar-icon-btn" title="Hỗ trợ &amp; Tin nhắn">

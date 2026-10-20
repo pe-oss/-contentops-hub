@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -1695,7 +1695,7 @@ class MyTasksView(View):
 
 @method_decorator(login_required, name="dispatch")
 class NotificationListView(View):
-    """Màn hình danh sách thông báo (Spec mục 8, 10, B09)."""
+    """Màn hình danh sách thông báo và API endpoint cho chuông dropdown (Spec mục 8, 10, B09, UX Group 3)."""
     def get(self, request, workspace_id=None):
         workspace = None
         membership = None
@@ -1709,9 +1709,46 @@ class NotificationListView(View):
         unread_only = status_filter == "unread"
         notifications = get_user_notifications(request.user, workspace=workspace, unread_only=unread_only)
 
-        paginator = Paginator(notifications, 20)
+        is_ajax = (
+            request.GET.get("format") == "json"
+            or request.headers.get("x-requested-with") == "XMLHttpRequest"
+            or "application/json" in request.headers.get("accept", "")
+        )
+
+        per_page = 10 if is_ajax else 20
+        paginator = Paginator(notifications, per_page)
         page_number = request.GET.get("page", 1)
         page_obj = paginator.get_page(page_number)
+
+        if is_ajax:
+            items = []
+            for n in page_obj:
+                items.append({
+                    "id": str(n.id),
+                    "event_type": n.event_type,
+                    "event_type_display": n.get_event_type_display(),
+                    "title": n.title,
+                    "message": n.message,
+                    "entity_type": n.entity_type,
+                    "entity_id": str(n.entity_id) if n.entity_id else None,
+                    "target_url": n.target_url,
+                    "is_read": n.is_read,
+                    "read_at": n.read_at.isoformat() if n.read_at else None,
+                    "created_at": n.created_at.isoformat(),
+                    "created_at_display": n.created_at.strftime("%H:%M %d/%m/%Y"),
+                    "workspace_name": n.workspace.name,
+                    "read_url": reverse("workspaces:notification_read", kwargs={"notification_id": n.id}),
+                })
+            return JsonResponse({
+                "status": "success",
+                "notifications": items,
+                "has_next": page_obj.has_next(),
+                "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
+                "unread_count": get_unread_notifications_count(request.user, workspace=workspace),
+                "total_count": paginator.count,
+                "page": page_obj.number,
+                "num_pages": paginator.num_pages,
+            })
 
         return render(
             request,
@@ -1740,6 +1777,19 @@ class NotificationReadView(View):
             notif.read_at = timezone.now()
             notif.save(update_fields=["read_at"])
 
+        is_ajax = (
+            request.headers.get("x-requested-with") == "XMLHttpRequest"
+            or request.content_type == "application/json"
+            or request.GET.get("format") == "json"
+        )
+        if is_ajax:
+            return JsonResponse({
+                "status": "success",
+                "notification_id": str(notif.id),
+                "target_url": notif.target_url,
+                "unread_count": get_unread_notifications_count(request.user, workspace=notif.workspace),
+            })
+
         next_url = request.POST.get("next") or request.GET.get("next") or notif.target_url
         if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
             return redirect(next_url)
@@ -1757,6 +1807,18 @@ class NotificationReadAllView(View):
         active_ws_ids = list(Membership.objects.filter(user=request.user, status=MembershipStatus.ACTIVE).values_list("workspace_id", flat=True))
         if active_ws_ids:
             Notification.objects.filter(recipient=request.user, workspace_id__in=active_ws_ids, read_at__isnull=True).update(read_at=timezone.now())
+
+        is_ajax = (
+            request.headers.get("x-requested-with") == "XMLHttpRequest"
+            or request.content_type == "application/json"
+            or request.GET.get("format") == "json"
+        )
+        if is_ajax:
+            return JsonResponse({
+                "status": "success",
+                "unread_count": 0,
+            })
+
         messages.success(request, "Đã đánh dấu tất cả thông báo là đã đọc.")
         next_url = request.POST.get("next") or request.META.get("HTTP_REFERER")
         if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
