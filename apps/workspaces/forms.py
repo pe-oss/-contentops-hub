@@ -449,7 +449,12 @@ class PackageForm(forms.Form):
         max_length=3000,
         label="Mục tiêu của gói",
         widget=forms.Textarea(
-            attrs={"class": "form-control", "rows": 3, "placeholder": "Mục tiêu truyền thông, định vị và kết quả kỳ vọng..."}
+            attrs={
+                "class": "form-control",
+                "rows": 4,
+                "placeholder": "Mục tiêu truyền thông, định vị và kết quả kỳ vọng...",
+                "style": "min-height: 110px; resize: vertical;",
+            }
         ),
         help_text="1–3.000 ký tự.",
     )
@@ -457,7 +462,7 @@ class PackageForm(forms.Form):
         queryset=Membership.objects.none(),
         label="Thành viên điều phối",
         widget=forms.Select(attrs={"class": "form-control"}),
-        help_text="Người chịu trách nhiệm điều phối tiến độ của gói.",
+        help_text="Điều phối viên chịu trách nhiệm theo dõi tiến độ, tạo và phân công các bài viết trong gói.",
     )
     start_date = forms.DateField(
         label="Ngày bắt đầu",
