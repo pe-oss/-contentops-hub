@@ -20,44 +20,40 @@
       <h1>{{ workspace.name }}</h1>
       <p>Tổng quan vận hành nội dung đa kênh &bull; Múi giờ: <strong>{{ workspace.timezone }}</strong></p>
     </div>
-
-    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-      <a href="{% url 'workspaces:list' %}" class="btn" style="font-size: 13px;">← Workspaces</a>
-      <a href="{% url 'workspaces:my_tasks' workspace.id %}" class="btn" style="font-size: 13px;">📋 Việc của tôi</a>
-      <a href="{% url 'workspaces:workspace_notifications' workspace.id %}" class="btn" style="font-size: 13px;">🔔 Thông báo</a>
-      <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn" style="font-size: 13px;">📦 Kế hoạch &amp; Gói bài</a>
-      {% if is_owner %}
-        <a href="{% url 'workspaces:brand_profile' workspace.id %}" class="btn" style="font-size: 13px;">🏷️ Thương hiệu</a>
-        <a href="{% url 'workspaces:members' workspace.id %}" class="btn" style="font-size: 13px;">👥 Thành viên</a>
-        <a href="{% url 'workspaces:edit' workspace.id %}" class="btn btn-primary" style="font-size: 13px;">Chỉnh sửa</a>
-      {% endif %}
-    </div>
   </div>
 
   <!-- 3 METRIC KPI CARDS (Matching Figma Dashboard.png) -->
   {% include "workspaces/dashboard_top_kpi.html" %}
 
-  <!-- SECONDARY BADGES ROW: BLOCKERS & OVERDUE -->
-  <div style="display: flex; gap: 12px; margin-bottom: 28px; flex-wrap: wrap;">
-    {% if is_owner or is_coordinator %}
-      <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.blocked_items_count > 0 %}#fef2f2{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.blocked_items_count > 0 %}#fca5a5{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.blocked_items_count > 0 %}#dc2626{% else %}#64748b{% endif %};">
-        <span>⚠️ Bài bị chặn:</span>
-        <strong>{{ stats.blocked_items_count|default:0 }}</strong>
-      </a>
-      <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.overdue_items_count > 0 %}#fffbeb{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.overdue_items_count > 0 %}#fcd34d{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.overdue_items_count > 0 %}#d97706{% else %}#64748b{% endif %};">
-        <span>⏰ Bài trễ hạn:</span>
-        <strong>{{ stats.overdue_items_count|default:0 }}</strong>
-      </a>
-    {% else %}
-      <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.my_blocked_items_count > 0 %}#fef2f2{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.my_blocked_items_count > 0 %}#fca5a5{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.my_blocked_items_count > 0 %}#dc2626{% else %}#64748b{% endif %};">
-        <span>⚠️ Bài bị chặn:</span>
-        <strong>{{ stats.my_blocked_items_count|default:0 }}</strong>
-      </a>
-      <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.my_overdue_tasks_count > 0 %}#fffbeb{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.my_overdue_tasks_count > 0 %}#fcd34d{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.my_overdue_tasks_count > 0 %}#d97706{% else %}#64748b{% endif %};">
-        <span>⏰ Việc trễ hạn:</span>
-        <strong>{{ stats.my_overdue_tasks_count|default:0 }}</strong>
-      </a>
-    {% endif %}
+  <!-- SECONDARY BADGES ROW: BLOCKERS & OVERDUE (VÙNG 2) -->
+  <div style="margin-bottom: 28px;">
+    <div style="margin-bottom: 10px;">
+      <h3 style="margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 700; color: #1e293b;">
+        <span>⚠️</span>
+        <span>Vùng 2 — Bị chặn / Trễ hạn</span>
+      </h3>
+    </div>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+      {% if is_owner or is_coordinator %}
+        <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.blocked_items_count > 0 %}#fef2f2{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.blocked_items_count > 0 %}#fca5a5{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.blocked_items_count > 0 %}#dc2626{% else %}#64748b{% endif %};">
+          <span>⚠️ Bài bị chặn:</span>
+          <strong>{{ stats.blocked_items_count|default:0 }}</strong>
+        </a>
+        <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.overdue_items_count > 0 %}#fffbeb{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.overdue_items_count > 0 %}#fcd34d{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.overdue_items_count > 0 %}#d97706{% else %}#64748b{% endif %};">
+          <span>⏰ Bài trễ hạn:</span>
+          <strong>{{ stats.overdue_items_count|default:0 }}</strong>
+        </a>
+      {% else %}
+        <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.my_blocked_items_count > 0 %}#fef2f2{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.my_blocked_items_count > 0 %}#fca5a5{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.my_blocked_items_count > 0 %}#dc2626{% else %}#64748b{% endif %};">
+          <span>⚠️ Bài bị chặn:</span>
+          <strong>{{ stats.my_blocked_items_count|default:0 }}</strong>
+        </a>
+        <a href="#decision-region" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: {% if stats.my_overdue_tasks_count > 0 %}#fffbeb{% else %}#f8fafc{% endif %}; border: 1px solid {% if stats.my_overdue_tasks_count > 0 %}#fcd34d{% else %}var(--border){% endif %}; border-radius: 9999px; font-size: 13px; font-weight: 600; color: {% if stats.my_overdue_tasks_count > 0 %}#d97706{% else %}#64748b{% endif %};">
+          <span>⏰ Việc trễ hạn:</span>
+          <strong>{{ stats.my_overdue_tasks_count|default:0 }}</strong>
+        </a>
+      {% endif %}
+    </div>
   </div>
 
   <!-- GRID 6 DỊCH VỤ CHÍNH (Matching Figma Dashboard.png) -->

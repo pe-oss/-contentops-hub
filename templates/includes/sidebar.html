@@ -48,7 +48,7 @@
 
     <!-- 4. Lịch nội dung -->
     {% if current_workspace %}
-      <a href="{% url 'workspaces:package_list' current_workspace.id %}" class="sidebar-link {% if 'schedule' in request.resolver_match.url_name or 'calendar' in request.resolver_match.url_name %}active{% endif %}">
+      <a href="{% url 'workspaces:calendar' current_workspace.id %}" class="sidebar-link {% if request.resolver_match.url_name == 'calendar' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
           <line x1="16" x2="16" y1="2" y2="6"></line>
@@ -85,17 +85,6 @@
       </a>
     {% endif %}
 
-    <!-- 7. Thông báo -->
-    <a href="{% if current_workspace %}{% url 'workspaces:workspace_notifications' current_workspace.id %}{% else %}{% url 'notifications' %}{% endif %}" class="sidebar-link {% if 'notification' in request.resolver_match.url_name %}active{% endif %}">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
-        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
-      </svg>
-      <span>Thông báo</span>
-      {% if unread_notifications_count > 0 %}
-        <span class="icon-badge" style="position: static; margin-left: auto;">{{ unread_notifications_count }}</span>
-      {% endif %}
-    </a>
 
     <!-- 8. Báo cáo -->
     {% if current_workspace %}
@@ -109,12 +98,22 @@
       </a>
     {% endif %}
 
-    <!-- 9. Cài đặt -->
+    <!-- 9. Thương hiệu -->
+    {% if current_workspace %}
+      <a href="{% url 'workspaces:brand_profile' current_workspace.id %}" class="sidebar-link {% if request.resolver_match.url_name == 'brand_profile' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 7h.01M7 3h5c.5 0 1 .2 1.4.6l7 7a2 2 0 0 1 0 2.8l-7 7a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 3 12V7a4 4 0 0 1 4-4z"></path>
+        </svg>
+        <span>Thương hiệu</span>
+      </a>
+    {% endif %}
+
+    <!-- 10. Cài đặt -->
     {% if current_workspace and current_membership.access_role == 'OWNER' %}
-      <a href="{% url 'workspaces:edit' current_workspace.id %}" class="sidebar-link {% if request.resolver_match.url_name in 'edit,brand_profile' %}active{% endif %}">
+      <a href="{% url 'workspaces:edit' current_workspace.id %}" class="sidebar-link {% if request.resolver_match.url_name == 'edit' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0 2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
         </svg>
         <span>Cài đặt</span>
       </a>

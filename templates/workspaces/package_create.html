@@ -3,68 +3,110 @@
 {% block title %}Tạo Gói nội dung mới — {{ workspace.name }}{% endblock %}
 
 {% block content %}
-<section class="dashboard-page" style="max-width: 680px; margin: 0 auto;">
-  <div class="dashboard-header" style="margin-bottom: 24px;">
-    <p class="eyebrow"><a href="{% url 'workspaces:package_list' workspace.id %}" style="text-decoration: none;">← Quay lại danh sách gói</a></p>
-    <h1>📦 Tạo Gói nội dung mới</h1>
-    <p class="muted">Khởi tạo kế hoạch chiến dịch nội dung và chỉ định thành viên điều phối.</p>
+<section class="dashboard-page" style="max-width: 720px; margin: 0 auto; padding-top: 16px;">
+  <!-- Đầu trang: link “← Gói content”, tiêu đề vừa phải, mô tả bên dưới; giảm khoảng trống thừa -->
+  <div style="margin-bottom: 20px;">
+    <p class="eyebrow" style="margin: 0 0 6px 0;">
+      <a href="{% url 'workspaces:package_list' workspace.id %}" style="text-decoration: none; color: var(--primary); font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">← Gói content</a>
+    </p>
+    <h1 style="font-size: 24px; font-weight: 700; color: #0f172a; margin: 0 0 6px 0;">Tạo Gói nội dung mới</h1>
+    <p class="muted" style="margin: 0; font-size: 14px;">Khởi tạo kế hoạch chiến dịch nội dung và chỉ định thành viên điều phối.</p>
   </div>
 
-  <div class="card">
+  <!-- Hướng dẫn rõ: tạo gói → thêm bài/phân công → duyệt kế hoạch -->
+  <div class="package-workflow-steps" aria-label="Quy trình thực hiện gói">
+    <div class="workflow-step-item active">
+      <span class="workflow-step-badge">1</span>
+      <span>Tạo gói nháp</span>
+    </div>
+    <span class="workflow-step-arrow">→</span>
+    <div class="workflow-step-item">
+      <span class="workflow-step-badge">2</span>
+      <span>Thêm bài / Phân công</span>
+    </div>
+    <span class="workflow-step-arrow">→</span>
+    <div class="workflow-step-item">
+      <span class="workflow-step-badge">3</span>
+      <span>Duyệt kế hoạch</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding: 24px;">
     <form method="post" novalidate>
       {% csrf_token %}
 
       {% if form.non_field_errors %}
-        <div class="alert alert-error" style="margin-bottom: 16px;">
+        <div class="form-alert" style="margin-bottom: 20px;">
           {% for error in form.non_field_errors %}
             <div>{{ error }}</div>
           {% endfor %}
         </div>
       {% endif %}
 
-      <div style="margin-bottom: 16px;">
-        <label for="{{ form.name.id_for_label }}"><strong>{{ form.name.label }}</strong> <span style="color: red;">*</span></label>
-        {{ form.name }}
-        {% if form.name.help_text %}<small class="muted" style="display: block; margin-top: 4px;">{{ form.name.help_text }}</small>{% endif %}
-        {% for error in form.name.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
-      </div>
+      <!-- 1. Thông tin gói: tên, mục tiêu toàn chiều rộng -->
+      <div class="package-form-section" style="margin-bottom: 24px;">
+        <h2 style="font-size: 15px; font-weight: 700; color: #1e293b; margin: 0 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;">
+          <span>1. Thông tin gói</span>
+        </h2>
+        <div style="display: grid; gap: 16px;">
+          <div>
+            <label for="{{ form.name.id_for_label }}"><strong>{{ form.name.label }}</strong> <span style="color: #dc2626;">*</span></label>
+            {{ form.name }}
+            {% if form.name.help_text %}<small class="muted" style="display: block; margin-top: 4px;">{{ form.name.help_text }}</small>{% endif %}
+            {% for error in form.name.errors %}<div class="field-error" style="margin-top: 4px;">{{ error }}</div>{% endfor %}
+          </div>
 
-      <div style="margin-bottom: 16px;">
-        <label for="{{ form.objective.id_for_label }}"><strong>{{ form.objective.label }}</strong> <span style="color: red;">*</span></label>
-        {{ form.objective }}
-        {% if form.objective.help_text %}<small class="muted" style="display: block; margin-top: 4px;">{{ form.objective.help_text }}</small>{% endif %}
-        {% for error in form.objective.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
-      </div>
+          <div>
+            <label for="{{ form.objective.id_for_label }}"><strong>{{ form.objective.label }}</strong> <span style="color: #dc2626;">*</span></label>
+            {{ form.objective }}
+            {% if form.objective.help_text %}<small class="muted" style="display: block; margin-top: 4px;">{{ form.objective.help_text }}</small>{% endif %}
+            {% for error in form.objective.errors %}<div class="field-error" style="margin-top: 4px;">{{ error }}</div>{% endfor %}
+          </div>
 
-      <div style="margin-bottom: 16px;">
-        <label for="{{ form.coordinator_membership.id_for_label }}"><strong>{{ form.coordinator_membership.label }}</strong> <span style="color: red;">*</span></label>
-        {{ form.coordinator_membership }}
-        {% if form.coordinator_membership.help_text %}<small class="muted" style="display: block; margin-top: 4px;">{{ form.coordinator_membership.help_text }}</small>{% endif %}
-        {% for error in form.coordinator_membership.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
-      </div>
-
-      <div class="responsive-two-cols" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;">
-        <div>
-          <label for="{{ form.start_date.id_for_label }}"><strong>{{ form.start_date.label }}</strong> <span style="color: red;">*</span></label>
-          {{ form.start_date }}
-          {% for error in form.start_date.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
-        </div>
-        <div>
-          <label for="{{ form.end_date.id_for_label }}"><strong>{{ form.end_date.label }}</strong> <span style="color: red;">*</span></label>
-          {{ form.end_date }}
-          {% for error in form.end_date.errors %}<div style="color: var(--danger, #c5221f); font-size: 13px; margin-top: 4px;">{{ error }}</div>{% endfor %}
+          <div>
+            <label for="{{ form.channel.id_for_label }}"><strong>{{ form.channel.label }}</strong></label>
+            {{ form.channel }}
+            {% if form.channel.help_text %}<small class="muted" style="display: block; margin-top: 4px;">{{ form.channel.help_text }}</small>{% endif %}
+          </div>
         </div>
       </div>
 
-      <div style="margin-bottom: 24px;">
-        <label for="{{ form.channel.id_for_label }}"><strong>{{ form.channel.label }}</strong></label>
-        {{ form.channel }}
-        {% if form.channel.help_text %}<small class="muted" style="display: block; margin-top: 4px;">{{ form.channel.help_text }}</small>{% endif %}
+      <!-- 2. Thời gian: ngày bắt đầu/kết thúc cạnh nhau trên desktop, xếp một cột trên mobile -->
+      <div class="package-form-section" style="margin-bottom: 24px;">
+        <h2 style="font-size: 15px; font-weight: 700; color: #1e293b; margin: 0 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;">
+          <span>2. Thời gian thực hiện</span>
+        </h2>
+        <div class="responsive-two-cols" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div>
+            <label for="{{ form.start_date.id_for_label }}"><strong>{{ form.start_date.label }}</strong> <span style="color: #dc2626;">*</span></label>
+            {{ form.start_date }}
+            {% for error in form.start_date.errors %}<div class="field-error" style="margin-top: 4px;">{{ error }}</div>{% endfor %}
+          </div>
+          <div>
+            <label for="{{ form.end_date.id_for_label }}"><strong>{{ form.end_date.label }}</strong> <span style="color: #dc2626;">*</span></label>
+            {{ form.end_date }}
+            {% for error in form.end_date.errors %}<div class="field-error" style="margin-top: 4px;">{{ error }}</div>{% endfor %}
+          </div>
+        </div>
       </div>
 
-      <div style="display: flex; gap: 10px; justify-content: flex-end;">
-        <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn">Hủy bỏ</a>
-        <button type="submit" class="btn btn-primary">Khởi tạo Gói nội dung</button>
+      <!-- 3. Người phụ trách: điều phối viên, giải thích trách nhiệm ngắn -->
+      <div class="package-form-section" style="margin-bottom: 24px;">
+        <h2 style="font-size: 15px; font-weight: 700; color: #1e293b; margin: 0 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;">
+          <span>3. Người phụ trách</span>
+        </h2>
+        <div>
+          <label for="{{ form.coordinator_membership.id_for_label }}"><strong>{{ form.coordinator_membership.label }}</strong> <span style="color: #dc2626;">*</span></label>
+          {{ form.coordinator_membership }}
+          {% if form.coordinator_membership.help_text %}<small class="muted" style="display: block; margin-top: 4px;">{{ form.coordinator_membership.help_text }}</small>{% endif %}
+          {% for error in form.coordinator_membership.errors %}<div class="field-error" style="margin-top: 4px;">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <!-- Actions: Có Hủy và nút chính đúng hành vi; dùng “Tạo gói nháp” nếu tạo DRAFT -->
+      <div style="display: flex; gap: 12px; justify-content: flex-end; align-items: center; padding-top: 16px; border-top: 1px solid var(--border);">
+        <a href="{% url 'workspaces:package_list' workspace.id %}" class="btn" style="text-decoration: none;">Hủy</a>
+        <button type="submit" class="btn btn-primary">Tạo gói nháp</button>
       </div>
     </form>
   </div>
